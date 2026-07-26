@@ -1,6 +1,6 @@
-# BoxMeOut — Architecture Documentation
+# BANKERCHANGER — Architecture Documentation
 
-This document describes the high-level system architecture, data flows, and key interaction patterns of the BoxMeOut decentralized boxing prediction market.
+This document describes the high-level system architecture, data flows, and key interaction patterns of the BANKERCHANGER decentralized boxing prediction market.
 
 ## Table of Contents
 
@@ -14,7 +14,7 @@ This document describes the high-level system architecture, data flows, and key 
 
 ## System Overview
 
-BoxMeOut is a full-stack decentralized application consisting of four main layers:
+BANKERCHANGER is a full-stack decentralized application consisting of four main layers:
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|

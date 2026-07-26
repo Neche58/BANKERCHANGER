@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Bet Database Model
+// BANKERCHANGER — Bet Database Model
 // ============================================================
 
 export interface Bet {

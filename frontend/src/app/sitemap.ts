@@ -1,7 +1,7 @@
 import { MetadataRoute } from 'next';
 import { fetchMarkets } from '@/services/api';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://boxmeout.io';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://bankerchanger.io';
 
 export const revalidate = 3600; // Revalidate every hour
 

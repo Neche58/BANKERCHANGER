@@ -12,7 +12,7 @@ export interface UseWalletResult {
   disconnect: () => void;
 }
 
-const STORAGE_KEY = 'boxmeout_wallet_address';
+const STORAGE_KEY = 'bankerchanger_wallet_address';
 
 export function useWallet(): UseWalletResult {
   const { walletAddress, walletBalance, isConnecting, setWallet, clearWallet } = useAppStore();

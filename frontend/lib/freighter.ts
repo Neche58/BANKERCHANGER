@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Freighter Wallet Utilities (lib)
+// BANKERCHANGER — Freighter Wallet Utilities (lib)
 // Low-level helpers for Freighter browser extension integration.
 // Works on Stellar Testnet and Mainnet (from NEXT_PUBLIC_STELLAR_NETWORK).
 // ============================================================

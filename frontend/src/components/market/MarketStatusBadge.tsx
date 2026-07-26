@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — MarketStatusBadge Component
+// BANKERCHANGER — MarketStatusBadge Component
 // ============================================================
 
 import type { MarketStatus } from '../../types';

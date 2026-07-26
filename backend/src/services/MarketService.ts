@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Market Service
+// BANKERCHANGER — Market Service
 // Business logic layer between controllers and the DB/chain.
 // Contributors: implement every function marked TODO.
 // ============================================================

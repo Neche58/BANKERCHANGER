@@ -1,7 +1,7 @@
 'use client';
 
 // ============================================================
-// BOXMEOUT — CountdownTimer Component
+// BANKERCHANGER — CountdownTimer Component
 // ============================================================
 
 import { useState, useEffect } from 'react';

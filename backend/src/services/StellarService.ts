@@ -1,6 +1,6 @@
 // @ts-nocheck
 // ============================================================
-// BOXMEOUT — Stellar Service
+// BANKERCHANGER — Stellar Service
 // Low-level Stellar SDK wrapper for contract interactions.
 // Contributors: implement every function marked TODO.
 // ============================================================

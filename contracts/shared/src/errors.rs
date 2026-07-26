@@ -1,5 +1,5 @@
 //! ============================================================
-//! BOXMEOUT — Contract Error Types
+//! BANKERCHANGER — Contract Error Types
 //! Every contract function returns Result<T, ContractError>.
 //! No unwrap() allowed in contract code.
 //! ============================================================

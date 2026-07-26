@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Admin Controller
+// BANKERCHANGER — Admin Controller
 // All routes protected by JWT middleware + admin role check.
 // ============================================================
 

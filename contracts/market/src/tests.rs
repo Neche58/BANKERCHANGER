@@ -1,5 +1,5 @@
 //! ============================================================
-//! BOXMEOUT — Market Security Tests
+//! BANKERCHANGER — Market Security Tests
 //! Covers: re-entrancy, auth checks, pause guard, CEI pattern,
 //!         stale-state-after-transfer, payout math.
 //! ============================================================

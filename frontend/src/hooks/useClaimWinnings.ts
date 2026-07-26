@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — useClaimWinnings Hook
+// BANKERCHANGER — useClaimWinnings Hook
 // ============================================================
 
 import { useState, useCallback } from 'react';
@@ -49,7 +49,7 @@ export function useClaimWinnings(): UseClaimWinningsResult {
 
       // Invalidate caches so useBets and useMarket refetch fresh data
       // Both hooks use useEffect with no external cache — trigger by dispatching a custom event
-      window.dispatchEvent(new CustomEvent('boxmeout:claim_success', { detail: { marketId } }));
+      window.dispatchEvent(new CustomEvent('bankerchanger:claim_success', { detail: { marketId } }));
     } catch (e: any) {
       const msg = e?.message ?? 'Claim failed';
       setError(msg);

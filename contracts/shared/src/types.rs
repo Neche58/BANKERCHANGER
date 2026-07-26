@@ -1,5 +1,5 @@
 //! ============================================================
-//! BOXMEOUT — Shared Types
+//! BANKERCHANGER — Shared Types
 //! All contracts import from this crate.
 //! Contributors: DO NOT add logic here — types and structs only.
 //! ============================================================

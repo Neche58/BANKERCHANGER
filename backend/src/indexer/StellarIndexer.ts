@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Stellar Blockchain Indexer
+// BANKERCHANGER — Stellar Blockchain Indexer
 //
 // Listens to the Stellar network for contract events emitted
 // by MarketFactory, Market, and Treasury contracts.

@@ -1,6 +1,6 @@
 #![no_std]
 //! ============================================================
-//! BOXMEOUT — MarketFactory Contract (Security-Audited)
+//! BANKERCHANGER — MarketFactory Contract (Security-Audited)
 //! ============================================================
 
 use soroban_sdk::{contract, contractimpl, contractclient, Address, Env, Vec, Map, BytesN};

@@ -6,7 +6,7 @@ const options: swaggerJsdoc.Options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'BoxMeOut API',
+      title: 'BANKERCHANGER API',
       version: '1.0.0',
       description: 'Decentralized boxing prediction market API',
     },

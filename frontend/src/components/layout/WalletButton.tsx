@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — WalletButton Component
+// BANKERCHANGER — WalletButton Component
 // ============================================================
 
 'use client';
