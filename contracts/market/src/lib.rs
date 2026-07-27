@@ -39,6 +39,12 @@ const PENDING_REPORTS: &str = "PENDING_REPORTS";
 /// Maximum TTL for market data (30 days in ledger entries)
 const MAX_TTL: u32 = 2_592_000;
 
+/// Maximum price impact (slippage) allowed per bet, in basis points.
+/// A bet that would move the AMM price by more than this is rejected.
+/// 3000 bps = 30% — protects bettors from placing inadvertently large
+/// orders into thin pools that would give them very poor execution.
+const MAX_SLIPPAGE_BPS: i128 = 3_000;
+
 // ─── Cross-contract client for oracle whitelist check ─────────────────────────
 #[contractclient(name = "FactoryClient")]
 pub trait FactoryInterface {
@@ -224,6 +230,31 @@ impl Market {
         }
         if amount > state.config.max_bet {
             return Err(ContractError::BetTooLarge);
+        }
+
+        // Slippage / price-impact sanity check.
+        // Compute the AMM price impact of this bet. If the pool is so thin that
+        // the bet would move the price by more than MAX_SLIPPAGE_BPS (30%), reject
+        // it to protect bettors from catastrophically bad execution.
+        // The check only applies when all pools are initialised (> 0); when a pool
+        // is still zero the AMM is not yet active and we skip the check.
+        if state.pool_a > 0 && state.pool_b > 0 && state.pool_draw > 0 {
+            let side_byte: u8 = match side {
+                BetSide::FighterA => 0,
+                BetSide::FighterB => 1,
+                BetSide::Draw     => 2,
+            };
+            if let Some((_shares, impact_bps)) = boxmeout_shared::amm::compute_odds(
+                state.pool_a,
+                state.pool_b,
+                state.pool_draw,
+                amount,
+                side_byte,
+            ) {
+                if impact_bps > MAX_SLIPPAGE_BPS {
+                    return Err(ContractError::BetTooLarge);
+                }
+            }
         }
 
         // ── EFFECTS ───────────────────────────────────────────────────────────
