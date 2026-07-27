@@ -5,8 +5,10 @@ import type { Bet } from '../../src/models/Bet';
 
 // ── Mock cache so tests never touch Redis ────────────────────────────────────
 jest.mock('../../src/services/cache.service', () => ({
-  cacheGet: jest.fn().mockResolvedValue(null),
-  cacheSet: jest.fn().mockResolvedValue(undefined),
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue(undefined),
+  del: jest.fn().mockResolvedValue(undefined),
+  delPattern: jest.fn().mockResolvedValue(undefined),
 }));
 
 // ── Mock StellarService to avoid SDK compilation errors ──────────────────────
@@ -51,7 +53,7 @@ const MARKET_RESOLVED = makeMarket({ market_id: 'mkt-2', status: 'resolved' });
 // ── Tests ─────────────────────────────────────────────────────────────────────
 describe('MarketService', () => {
   beforeEach(() => {
-    setDbAdapter({
+    const dbAdapter = {
       findMarkets: jest.fn().mockResolvedValue([MARKET_OPEN, MARKET_RESOLVED]),
       findMarketById: jest.fn().mockImplementation((id: string) =>
         Promise.resolve([MARKET_OPEN, MARKET_RESOLVED].find(m => m.market_id === id) ?? null),
@@ -59,7 +61,13 @@ describe('MarketService', () => {
       findBetsByAddress: jest.fn().mockResolvedValue([]),
       findBetsByMarket: jest.fn().mockResolvedValue([]),
       updateMarketStatus: jest.fn(),
-    });
+    };
+    setDbAdapter(dbAdapter);
+  });
+
+  afterEach(() => {
+    // Reset the DB adapter so mocks don't leak between test suites
+    setDbAdapter(null as any);
   });
 
   // 1 ─────────────────────────────────────────────────────────────────────────
