@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: boxmeout
-      POSTGRES_PASSWORD: boxmeout
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: boxmeout
     ports:
       - '5432:5432'
@@ -80,7 +80,7 @@ services:
     profiles: [test]
     environment:
       POSTGRES_USER: boxmeout
-      POSTGRES_PASSWORD: boxmeout
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: boxmeout_test
     ports:
       - '5433:5432'

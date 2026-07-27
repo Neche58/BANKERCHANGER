@@ -8,9 +8,9 @@
  *   4. handleMarketResolved() (indexer) updates the market row in the DB
  *   5. ActivityFeed.publish() broadcasts the "resolved" WebSocket event
  *
- * Requires a running PostgreSQL instance:
- *   DATABASE_URL=postgresql://boxmeout:boxmeout@localhost:5433/boxmeout_test
- *   docker compose --profile test up -d postgres-test
+* Requires a running PostgreSQL instance:
+*   DATABASE_URL=<connection-string>
+*   docker compose --profile test up -d postgres-test
  *
  * Redis and invokeContract are mocked so no live Stellar network is needed.
  */
@@ -31,8 +31,7 @@ import type { RawStellarEvent } from '../../src/indexer/StellarIndexer';
 
 // -- Environment --------------------------------------------------------------
 
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL ?? 'postgresql://boxmeout:boxmeout@localhost:5433/boxmeout_test';
+process.env.DATABASE_URL = process.env.DATABASE_URL ?? '';
 
 // Deterministic oracle keypair (Stellar testnet-format, never used on mainnet)
 const ORACLE_SECRET = 'SCZANGBA5RLMPI7JMTP2C6GKMT2O6JVEAMOSYVBMSHAHJQERPIFOQKR';
