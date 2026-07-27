@@ -8,6 +8,7 @@ import { logger } from '../utils/logger';
 // Constants
 // ---------------------------------------------------------------------------
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-jwt-secret-change-me';
+const AUTH_TIMEOUT_MS = 5_000; // 5 seconds to send auth message
 
 // ---------------------------------------------------------------------------
 // Event types
@@ -17,6 +18,7 @@ export type ActivityEvent =
   | { type: 'dispute'; marketId: string; proposedOutcomeId: string }
   | { type: 'resolved'; marketId: string; winningOutcomeId: string };
 
+type AuthMsg = { type: 'auth'; token: string };
 type SubscribeMsg = { type: 'subscribe_activity'; marketId: string };
 
 // ---------------------------------------------------------------------------
@@ -51,22 +53,25 @@ export class ActivityFeed {
   private rateLimiter = new MarketRateLimiter();
   // Track authenticated connections
   private authenticated = new WeakSet<WebSocket>();
+  // Track auth timeout timers per socket
+  private authTimeouts = new WeakMap<WebSocket, NodeJS.Timeout>();
 
   constructor(server: Server) {
     this.wss = new WebSocketServer({ server });
     this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-      // Verify JWT from query param
-      const url = new URL(req.url || '', `http://${req.headers.host}`);
-      const token = url.searchParams.get('token');
+      // Accept connection without verifying JWT in URL
+      // Authentication happens in the first message
+      
+      // Set a timeout for the client to send auth message
+      const authTimeout = setTimeout(() => {
+        ws.close(4001, 'Authentication timeout');
+      }, AUTH_TIMEOUT_MS);
+      
+      this.authTimeouts.set(ws, authTimeout);
 
-      if (!token || !this.verifyToken(token)) {
-        ws.close(4001, 'Unauthorized');
-        return;
-      }
-
-      this.authenticated.add(ws);
       ws.on('message', (raw) => this.handleMessage(ws, raw.toString()));
-      ws.on('close', () => this.removeSocket(ws));
+      ws.on('close', () => this.cleanupSocket(ws));
+      ws.on('error', () => this.cleanupSocket(ws));
     });
     logger.info('ActivityFeed WebSocket server attached');
   }
@@ -81,14 +86,40 @@ export class ActivityFeed {
   }
 
   private handleMessage(ws: WebSocket, raw: string): void {
-    if (!this.authenticated.has(ws)) {
-      ws.close(4001, 'Unauthorized');
+    let msg: unknown;
+    try {
+      msg = JSON.parse(raw);
+    } catch {
       return;
     }
 
-    let msg: unknown;
-    try { msg = JSON.parse(raw); } catch { return; }
+    // If not authenticated, expect auth message
+    if (!this.authenticated.has(ws)) {
+      const authMsg = msg as AuthMsg;
+      if (authMsg.type !== 'auth' || typeof authMsg.token !== 'string') {
+        ws.close(4001, 'Expected auth message');
+        return;
+      }
 
+      if (!this.verifyToken(authMsg.token)) {
+        ws.close(4001, 'Invalid token');
+        return;
+      }
+
+      // Authentication successful
+      this.authenticated.add(ws);
+      
+      // Clear the auth timeout
+      const timeout = this.authTimeouts.get(ws);
+      if (timeout) {
+        clearTimeout(timeout);
+        this.authTimeouts.delete(ws);
+      }
+
+      return;
+    }
+
+    // Authenticated: handle subscription messages
     const { type, marketId } = msg as SubscribeMsg;
     if (type !== 'subscribe_activity' || typeof marketId !== 'string') return;
 
@@ -98,7 +129,15 @@ export class ActivityFeed {
     this.subscriptions.get(marketId)!.add(ws);
   }
 
-  private removeSocket(ws: WebSocket): void {
+  private cleanupSocket(ws: WebSocket): void {
+    // Clear auth timeout if still pending
+    const timeout = this.authTimeouts.get(ws);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.authTimeouts.delete(ws);
+    }
+
+    // Remove from subscriptions
     for (const [marketId, sockets] of this.subscriptions.entries()) {
       sockets.delete(ws);
       if (sockets.size === 0) {
