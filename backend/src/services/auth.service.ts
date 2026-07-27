@@ -80,8 +80,16 @@ function signReset(userId: string): string {
   } as jwt.SignOptions);
 }
 
-function verifyJwt(token: string, expectedType: string): jwt.JwtPayload {
-  const payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+export function verifyJwt(token: string, expectedType: string): jwt.JwtPayload {
+  let payload: jwt.JwtPayload;
+  try {
+    payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      throw new AppError(401, 'Token has expired');
+    }
+    throw new AppError(401, 'Invalid token');
+  }
   if (payload.type !== expectedType) throw new AppError(401, 'Invalid token type');
   return payload;
 }
