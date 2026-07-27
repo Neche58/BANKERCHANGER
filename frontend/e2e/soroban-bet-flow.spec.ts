@@ -10,10 +10,11 @@
  *   connect wallet → create market → place bet → oracle resolution → claim winnings
  *
  * Environment variables (set by CI):
- *   SOROBAN_MARKET_CONTRACT_ID  — deployed market contract address
- *   SOROBAN_TEST_SECRET_KEY     — funded test keypair secret key
- *   SOROBAN_TEST_PUBLIC_KEY     — corresponding public key
- *   NEXT_PUBLIC_API_URL         — backend URL (http://localhost:3001)
+ *   SOROBAN_MARKET_CONTRACT_ID      — deployed market contract address
+ *   E2E_FACTORY_CONTRACT_ADDRESS    — deployed factory contract address
+ *   SOROBAN_TEST_SECRET_KEY         — funded test keypair secret key
+ *   SOROBAN_TEST_PUBLIC_KEY         — corresponding public key
+ *   NEXT_PUBLIC_API_URL             — backend URL (http://localhost:3001)
  */
 
 import { test, expect, Page } from '@playwright/test';
@@ -26,6 +27,9 @@ const TEST_PUBLIC_KEY =
 
 const MARKET_CONTRACT_ID =
   process.env.SOROBAN_MARKET_CONTRACT_ID ?? 'CTEST_MARKET_CONTRACT_PLACEHOLDER';
+
+const FACTORY_CONTRACT_ADDRESS =
+  process.env.E2E_FACTORY_CONTRACT_ADDRESS ?? 'CFACTORY_CONTRACT_PLACEHOLDER';
 
 const BET_AMOUNT_XLM = '5';
 
@@ -50,6 +54,7 @@ const LOCAL_MARKET = {
   odds_draw: 2500,
   fee_bps: 200,
   contract_address: MARKET_CONTRACT_ID,
+  factory_address: FACTORY_CONTRACT_ADDRESS,
 };
 
 const RESOLVED_MARKET = {
