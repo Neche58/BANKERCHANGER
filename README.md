@@ -26,7 +26,7 @@ docs/         Architecture and API documentation
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/boxmeout.git && cd boxmeout
+git clone https://github.com/doradenise-jpg/BANKERCHANGER.git && cd BANKERCHANGER
 
 # 2. Set up environment files
 cp backend/.env.example backend/.env

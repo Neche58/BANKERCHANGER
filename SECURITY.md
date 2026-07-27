@@ -12,7 +12,10 @@ We take the security of BoxMeOut seriously. If you believe you have found a secu
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-Instead, please report them via email to **security@boxmeout.app** (or the maintainer's email listed in the repository's commit history).
+Instead, please report them via one of the following channels:
+
+- **GitHub Security Advisory:** [Submit a private vulnerability report](https://github.com/doradenise-jpg/BANKERCHANGER/security/advisories/new)
+- **Email:** **security@boxmeout.app**
 
 You should receive a response within 48 hours. If you do not, please follow up to ensure your message was received.
 
