@@ -22,6 +22,7 @@ import { logger } from '../../src/utils/logger';
 describe('autoResolution.cron integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.restoreAllMocks();
     // Ensure env var is not set to disabled
     delete process.env.AUTO_RESOLUTION_CRON_DISABLED;
   });
