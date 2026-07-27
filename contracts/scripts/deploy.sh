@@ -65,6 +65,13 @@ if [[ -z "$ADMIN_SECRET_KEY" ]]; then
     exit 1
 fi
 
+# Validate Stellar secret key format (starts with 'S', 56 base32 chars)
+if [[ ! "$ADMIN_SECRET_KEY" =~ ^S[A-Z2-7]{55}$ ]]; then
+    echo "ERROR: ADMIN_SECRET_KEY is not a valid Stellar secret key" >&2
+    echo "Expected format: starts with 'S', followed by 55 alphanumeric base32 characters (56 total)" >&2
+    exit 1
+fi
+
 if [[ -z "$STELLAR_RPC_URL" ]]; then
     echo "ERROR: STELLAR_RPC_URL is not set" >&2
     echo "Please set STELLAR_RPC_URL or use a valid network (testnet/mainnet)" >&2
