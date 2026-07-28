@@ -148,6 +148,53 @@ async function buildAndSubmit(
 
 // ─── Wallet connection ────────────────────────────────────────────────────────
 
+/** Returns which wallet extensions are installed in the current browser. */
+export function detectWallets(): { freighter: boolean; albedo: boolean } {
+  if (typeof window === 'undefined') return { freighter: false, albedo: false };
+  return {
+    freighter: !!(window as any).freighter,
+    albedo: !!(window as any).albedo,
+  };
+}
+
+export type WalletType = 'freighter' | 'albedo';
+
+/**
+ * Connect to a specific wallet extension by name.
+ * Used by the wallet selection modal so each button connects to the
+ * wallet the user explicitly chose (#360).
+ */
+export async function connectWalletByType(type: WalletType): Promise<string> {
+  if (typeof window === 'undefined') throw new Error('Browser only');
+
+  if (type === 'freighter') {
+    const freighter = (window as any).freighter;
+    if (!freighter) throw new WalletNotInstalledError('Freighter is not installed. Get it at https://freighter.app');
+    try {
+      await freighter.requestAccess();
+      const { publicKey } = await freighter.getPublicKey();
+      sessionStorage.setItem(WALLET_STORAGE_KEY, publicKey);
+      return publicKey;
+    } catch (err) {
+      throw new WalletConnectionError(err instanceof Error ? err.message : 'User rejected wallet connection');
+    }
+  }
+
+  if (type === 'albedo') {
+    const albedo = (window as any).albedo;
+    if (!albedo) throw new WalletNotInstalledError('Albedo is not installed. Get it at https://albedo.link');
+    try {
+      const { pubkey } = await albedo.publicKey({ token: 'boxmeout' });
+      sessionStorage.setItem(WALLET_STORAGE_KEY, pubkey);
+      return pubkey;
+    } catch (err) {
+      throw new WalletConnectionError(err instanceof Error ? err.message : 'User rejected wallet connection');
+    }
+  }
+
+  throw new WalletNotInstalledError();
+}
+
 export async function connectWallet(): Promise<string> {
   if (typeof window === 'undefined') throw new Error('Browser only');
   const freighter = (window as any).freighter;
