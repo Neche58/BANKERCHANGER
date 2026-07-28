@@ -14,6 +14,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 import type { BetSide, CreateProposalParams, VoteType } from '../types';
+import { xlmToStroops } from '../utils/xlmToStroops';
 
 const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? 'testnet';
 const HORIZON_URL =
@@ -463,15 +464,7 @@ export async function getWalletBalance(): Promise<number> {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-export function xlmToStroops(xlm: number): bigint {
-  const [whole, frac = ''] = xlm.toString().split('.');
-  const fracPadded = frac.slice(0, 7).padEnd(7, '0');
-  return BigInt(whole) * 10_000_000n + BigInt(fracPadded);
-}
-
-export function stroopsToXlm(stroops: bigint | string): number {
-  return Number(BigInt(stroops)) / 10_000_000;
-}
+export { xlmToStroops, stroopsToXlm } from '../utils/xlmToStroops';
 
 export function stellarExplorerUrl(
   type: 'tx' | 'account' | 'contract',
