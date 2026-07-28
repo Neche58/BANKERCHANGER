@@ -1,3 +1,54 @@
+// ── Mock env config FIRST (Jest hoists jest.mock above imports) ──────────────
+jest.mock('../../src/config/env', () => ({
+  getEnv: jest.fn().mockReturnValue({
+    DATABASE_URL: 'postgres://test:test@localhost:5432/test',
+    REDIS_URL: 'redis://localhost:6379',
+    STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
+    ORACLE_PRIVATE_KEY: 'S' + 'A'.repeat(55),
+    ADMIN_JWT_SECRET: 'admin-secret',
+    FACTORY_CONTRACT_ADDRESS: 'C' + 'A'.repeat(55),
+    PORT: 3000,
+    NODE_ENV: 'test',
+    JWT_SECRET: 'test-jwt-secret',
+    JWT_EXPIRES_IN: '15m',
+    REFRESH_EXPIRES_IN: '7d',
+    STELLAR_NETWORK: 'testnet',
+    HORIZON_URL: 'https://horizon-testnet.stellar.org',
+    ALLOWED_ORIGINS: 'http://localhost:3000',
+    GENESIS_LEDGER: 100000,
+    POLL_INTERVAL_MS: 5000,
+    LOG_LEVEL: 'info',
+    ENABLE_SWAGGER: false,
+    DB_POOL_MAX: 10,
+    DB_POOL_IDLE_TIMEOUT_MS: 30000,
+    DB_POOL_CONNECTION_TIMEOUT_MS: 5000,
+    VERIFY_EMAIL_URL: 'http://localhost:3001/auth/verify-email',
+  }),
+  validateEnv: jest.fn().mockReturnValue({
+    DATABASE_URL: 'postgres://test:test@localhost:5432/test',
+    REDIS_URL: 'redis://localhost:6379',
+    STELLAR_RPC_URL: 'https://soroban-testnet.stellar.org',
+    ORACLE_PRIVATE_KEY: 'S' + 'A'.repeat(55),
+    ADMIN_JWT_SECRET: 'admin-secret',
+    FACTORY_CONTRACT_ADDRESS: 'C' + 'A'.repeat(55),
+    PORT: 3000,
+    NODE_ENV: 'test',
+    JWT_SECRET: 'test-jwt-secret',
+    JWT_EXPIRES_IN: '15m',
+    REFRESH_EXPIRES_IN: '7d',
+    STELLAR_NETWORK: 'testnet',
+    ALLOWED_ORIGINS: 'http://localhost:3000',
+    GENESIS_LEDGER: 100000,
+    POLL_INTERVAL_MS: 5000,
+    LOG_LEVEL: 'info',
+    ENABLE_SWAGGER: false,
+    DB_POOL_MAX: 10,
+    DB_POOL_IDLE_TIMEOUT_MS: 30000,
+    DB_POOL_CONNECTION_TIMEOUT_MS: 5000,
+    VERIFY_EMAIL_URL: 'http://localhost:3001/auth/verify-email',
+  }),
+}));
+
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import * as authService from '../../src/services/auth.service';
@@ -30,7 +81,10 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    authService.users.clear();
+    // Clear in-memory users map if it exists (legacy test compatibility)
+    if ((authService as any).users?.clear) {
+      (authService as any).users.clear();
+    }
     db = drizzle(pool);
   });
 
@@ -447,6 +501,108 @@ describe('AuthService', () => {
         expect.any(String),
         expect.any(Object),
       );
+    });
+  });
+
+  // =========================================================================
+  // TOKEN EXPIRY
+  // =========================================================================
+  describe('Token expiry', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-06-01T12:00:00Z'));
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+      mockJwt.verify.mockReset();
+    });
+
+    it('should reject expired access token with 401 AppError', () => {
+      mockJwt.verify.mockImplementation(() => {
+        throw new jwt.TokenExpiredError('jwt expired', new Date('2026-06-01T11:59:00Z'));
+      });
+
+      expect.assertions(2);
+      try {
+        authService.verifyJwt('expired_access_token', 'access');
+      } catch (err) {
+        expect(err).toBeInstanceOf(AppError);
+        expect((err as AppError).statusCode).toBe(401);
+      }
+    });
+
+    it('should reject expired refresh token with 401 AppError', () => {
+      mockJwt.verify.mockImplementation(() => {
+        throw new jwt.TokenExpiredError('jwt expired', new Date('2026-06-01T11:59:00Z'));
+      });
+
+      expect.assertions(2);
+      try {
+        authService.verifyJwt('expired_refresh_token', 'refresh');
+      } catch (err) {
+        expect(err).toBeInstanceOf(AppError);
+        expect((err as AppError).statusCode).toBe(401);
+      }
+    });
+
+    it('should reject expired reset token with 400 AppError', async () => {
+      // Simulate an expired JWT that verifyJwt will catch
+      mockJwt.verify.mockImplementation(() => {
+        throw new jwt.TokenExpiredError('jwt expired', new Date('2026-06-01T11:45:00Z'));
+      });
+
+      // Advance past the 15-minute reset token expiry window
+      jest.advanceTimersByTime(16 * 60 * 1000); // 16 minutes
+
+      // resetPassword calls verifyJwt internally; expired token → 400
+      expect.assertions(2);
+      try {
+        await authService.resetPassword('expired_reset_token', 'newPassword123');
+      } catch (err) {
+        expect(err).toBeInstanceOf(AppError);
+        expect((err as AppError).statusCode).toBe(400);
+      }
+    });
+
+    it('should reject access token after advancing past default 15m expiry window', () => {
+      // Simulate a token that expired at 12:00 — verifyJwt wraps TokenExpiredError as 401
+      mockJwt.verify.mockImplementation(() => {
+        throw new jwt.TokenExpiredError('jwt expired', new Date('2026-06-01T12:00:00Z'));
+      });
+
+      // Advance 16 minutes past the token's issue time
+      jest.advanceTimersByTime(16 * 60 * 1000);
+
+      expect.assertions(2);
+      try {
+        authService.verifyJwt('access_token', 'access');
+      } catch (err) {
+        expect(err).toBeInstanceOf(AppError);
+        expect((err as AppError).statusCode).toBe(401);
+      }
+    });
+
+    it('should detect revoked session (403-equivalent guard)', async () => {
+      // Simulate session blocked in Redis (revoked after password reset)
+      mockCacheService.redis.get.mockResolvedValue('1');
+
+      const revoked = await authService.isSessionRevoked('user1', 0);
+      expect(revoked).toBe(true);
+    });
+
+    it('should verify valid token succeeds before expiry', () => {
+      mockJwt.verify.mockReturnValue({
+        sub: 'user1',
+        type: 'access',
+        sv: 0,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 900, // 15 min from now
+      } as never);
+
+      const payload = authService.verifyJwt('valid_token', 'access');
+      expect(payload.sub).toBe('user1');
+      expect(payload.type).toBe('access');
     });
   });
 });
