@@ -1,8 +1,8 @@
-# BOXMEOUT AMM Implementation
+# BANKERCHANGER AMM Implementation
 
 ## Overview
 
-This document describes the Automated Market Maker (AMM) implementation in BOXMEOUT, a prediction market platform for boxing matches. The AMM computes dynamic odds based on pool balances, preventing exploitation by large bets and enabling fair pricing across all outcomes.
+This document describes the Automated Market Maker (AMM) implementation in BANKERCHANGER, a prediction market platform for boxing matches. The AMM computes dynamic odds based on pool balances, preventing exploitation by large bets and enabling fair pricing across all outcomes.
 
 ---
 

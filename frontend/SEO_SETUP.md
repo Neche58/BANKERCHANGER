@@ -41,7 +41,7 @@ If the API is unavailable, the sitemap still returns base structure (homepage, m
 ## Environment Variables
 
 Set in your deployment:
-- `NEXT_PUBLIC_SITE_URL` - Your canonical domain (defaults to `https://boxmeout.io`)
+- `NEXT_PUBLIC_SITE_URL` - Your canonical domain (defaults to `https://bankerchanger.io`)
 - `NEXT_PUBLIC_API_URL` - Backend API endpoint (used by `fetchMarkets()`)
 
 ## Testing

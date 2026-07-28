@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Wallet Service
+// BANKERCHANGER — Wallet Service
 // Manages Freighter wallet connection and Stellar transactions.
 // ============================================================
 
@@ -26,7 +26,7 @@ const SOROBAN_RPC_URL =
 const NETWORK_PASSPHRASE =
   NETWORK === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
 
-const WALLET_STORAGE_KEY = 'boxmeout_wallet_address';
+const WALLET_STORAGE_KEY = 'bankerchanger_wallet_address';
 
 /**
  * Storage Decision: sessionStorage vs localStorage
@@ -166,7 +166,7 @@ export async function connectWallet(): Promise<string> {
   }
   if (albedo) {
     try {
-      const { pubkey } = await albedo.publicKey({ token: 'boxmeout' });
+      const { pubkey } = await albedo.publicKey({ token: 'bankerchanger' });
       sessionStorage.setItem(WALLET_STORAGE_KEY, pubkey);
       return pubkey;
     } catch (err) {

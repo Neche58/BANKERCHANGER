@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: BoxMeOut API
+  title: BANKERCHANGER API
   version: 0.2.0
-  description: REST API for the BoxMeOut decentralized boxing prediction market.
+  description: REST API for the BANKERCHANGER decentralized boxing prediction market.
 
 servers:
   - url: http://localhost:3001

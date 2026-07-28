@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Bet Service
+// BANKERCHANGER — Bet Service
 // Business logic for bet operations: recording, fetching, payouts
 // ============================================================
 

@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — API Service
+// BANKERCHANGER — API Service
 // Typed wrappers around the backend REST endpoints.
 // Base URL is set from NEXT_PUBLIC_API_URL env variable.
 // Contributors: implement every function marked TODO.

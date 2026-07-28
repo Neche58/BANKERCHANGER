@@ -1,6 +1,6 @@
 #![no_std]
 //! ============================================================
-//! BOXMEOUT — Market Contract (Security-Audited Implementation)
+//! BANKERCHANGER — Market Contract (Security-Audited Implementation)
 //! All fund-moving functions follow Checks-Effects-Interactions.
 //! require_auth() is always the first call in fund-moving fns.
 //! Emergency pause guard precedes every fund-moving operation.

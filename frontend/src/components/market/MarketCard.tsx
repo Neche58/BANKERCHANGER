@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — MarketCard Component
+// BANKERCHANGER — MarketCard Component
 // Compact card for the home page market grid.
 // Contributors: implement the JSX body.
 // ============================================================

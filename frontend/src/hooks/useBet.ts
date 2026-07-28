@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — useBet Hook
+// BANKERCHANGER — useBet Hook
 // ============================================================
 
 import { useState, useCallback, useMemo } from 'react';
