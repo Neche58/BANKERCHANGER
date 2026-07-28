@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# BOXMEOUT — Soroban Contract Deployment Script
+# BANKERCHANGER — Soroban Contract Deployment Script
 #
 # Deploys contracts in order: shared (build-only) → treasury
 #   → market_factory → market (template wasm upload)

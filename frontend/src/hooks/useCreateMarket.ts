@@ -5,17 +5,13 @@ import type { TxStatus } from '../types';
 import type { CreateMarketParams } from '../services/wallet';
 import { buildContractTransaction, submitTransaction, NETWORK_PASSPHRASE } from '../../lib/stellar';
 import { getConnectedAddress } from '../services/wallet';
+import { xlmToStroops } from '../utils/xlmToStroops';
 
 export interface UseCreateMarketResult {
   createMarket: (params: CreateMarketParams) => Promise<void>;
   txStatus: TxStatus['status'];
   txHash: string | null;
   error: string | null;
-}
-
-function xlmToStroops(xlm: number): bigint {
-  const [whole, frac = ''] = xlm.toString().split('.');
-  return BigInt(whole) * BigInt(10_000_000) + BigInt(frac.slice(0, 7).padEnd(7, '0'));
 }
 
 function buildArgs(params: CreateMarketParams): xdr.ScVal[] {
@@ -96,7 +92,15 @@ export function useCreateMarket(): UseCreateMarketResult {
           ? 'https://soroban-rpc.stellar.org'
           : 'https://soroban-testnet.stellar.org',
       );
-      const txResult = await server.getTransaction(hash);
+      
+      // Poll for transaction confirmation (max 30 seconds = 20 polls * 1.5s)
+      // Transaction may not be indexed immediately after submission
+      let txResult = await server.getTransaction(hash);
+      for (let i = 0; i < 20 && txResult.status === 'NOT_FOUND'; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        txResult = await server.getTransaction(hash);
+      }
+      
       if (txResult.status !== 'SUCCESS') throw new Error('Transaction did not succeed');
 
       const resultXdr = (txResult as any).returnValue

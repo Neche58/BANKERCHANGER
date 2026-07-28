@@ -1,5 +1,5 @@
 //! ============================================================
-//! BOXMEOUT — AMM Math Module
+//! BANKERCHANGER — AMM Math Module
 //! Automated Market Maker calculations for pool operations.
 //! ============================================================
 

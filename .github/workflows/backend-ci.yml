@@ -20,9 +20,9 @@ jobs:
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_USER: boxmeout
-          POSTGRES_PASSWORD: boxmeout
-          POSTGRES_DB: boxmeout
+          POSTGRES_USER: bankerchanger
+          POSTGRES_PASSWORD: bankerchanger
+          POSTGRES_DB: bankerchanger
         ports:
           - 5432:5432
       redis:
@@ -85,7 +85,7 @@ jobs:
         working-directory: backend
         run: npm run drizzle:check
         env:
-          DATABASE_URL: postgresql://boxmeout:boxmeout@localhost:5432/boxmeout
+          DATABASE_URL: postgresql://bankerchanger:bankerchanger@localhost:5432/bankerchanger
 
       - name: Lint
         working-directory: backend
@@ -101,7 +101,7 @@ jobs:
         working-directory: backend
         run: npm test
         env:
-          DATABASE_URL: postgresql://boxmeout:boxmeout@localhost:5432/boxmeout
+          DATABASE_URL: postgresql://bankerchanger:bankerchanger@localhost:5432/bankerchanger
           REDIS_URL: redis://localhost:6379
 
   load-test:
@@ -112,9 +112,9 @@ jobs:
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_USER: boxmeout
-          POSTGRES_PASSWORD: boxmeout
-          POSTGRES_DB: boxmeout
+          POSTGRES_USER: bankerchanger
+          POSTGRES_PASSWORD: bankerchanger
+          POSTGRES_DB: bankerchanger
         ports:
           - 5432:5432
       redis:
@@ -141,7 +141,7 @@ jobs:
           npx ts-node-dev --respawn src/index.ts &
           sleep 5
         env:
-          DATABASE_URL: postgresql://boxmeout:boxmeout@localhost:5432/boxmeout
+          DATABASE_URL: postgresql://bankerchanger:bankerchanger@localhost:5432/bankerchanger
           REDIS_URL: redis://localhost:6379
           PORT: 3001
 

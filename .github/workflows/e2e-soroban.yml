@@ -14,9 +14,9 @@ jobs:
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_USER: boxmeout
-          POSTGRES_PASSWORD: boxmeout
-          POSTGRES_DB: boxmeout
+          POSTGRES_USER: bankerchanger
+          POSTGRES_PASSWORD: bankerchanger
+          POSTGRES_DB: bankerchanger
         ports:
           - 5432:5432
       redis:
@@ -111,7 +111,7 @@ jobs:
       - name: Start backend
         working-directory: backend
         env:
-          DATABASE_URL: postgresql://boxmeout:boxmeout@localhost:5432/boxmeout
+          DATABASE_URL: postgresql://bankerchanger:bankerchanger@localhost:5432/bankerchanger
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: e2e-test-secret
           PORT: 3001

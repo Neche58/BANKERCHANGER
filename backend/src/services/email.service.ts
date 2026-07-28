@@ -19,9 +19,9 @@ export type EmailTemplate =
 // Constants
 // ---------------------------------------------------------------------------
 
-const APP_NAME = process.env.APP_NAME ?? 'BoxMeOut';
+const APP_NAME = process.env.APP_NAME ?? 'BANKERCHANGER';
 const APP_BASE_URL = process.env.APP_BASE_URL ?? 'http://localhost:3001';
-const FROM_ADDRESS = process.env.SMTP_FROM ?? 'no-reply@boxmeout.app';
+const FROM_ADDRESS = process.env.SMTP_FROM ?? 'no-reply@bankerchanger.app';
 
 const TEMPLATES_DIR = path.resolve(__dirname, '../email/templates');
 

@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Home Page (/)
+// BANKERCHANGER — Home Page (/)
 // Lists all boxing markets with filters, sorting, and pagination.
 // ============================================================
 
@@ -54,7 +54,7 @@ export default function HomePage(): JSX.Element {
   return (
     <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-black text-white">BOXMEOUT</h1>
+        <h1 className="text-2xl font-black text-white">BANKERCHANGER</h1>
         <p className="text-gray-400 text-sm mt-1">Decentralized boxing prediction markets on Stellar</p>
       </div>
 

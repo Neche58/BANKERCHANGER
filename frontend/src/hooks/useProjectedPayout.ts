@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — useProjectedPayout Hook
+// BANKERCHANGER — useProjectedPayout Hook
 // Pure client-side parimutuel payout preview.
 // No API call — recalculates on market, outcome, or amount change.
 // ============================================================

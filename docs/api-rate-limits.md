@@ -1,6 +1,6 @@
 # API Rate Limits
 
-BoxMeOut enforces rate limits on all API endpoints to protect against abuse and ensure fair access for all consumers.
+BANKERCHANGER enforces rate limits on all API endpoints to protect against abuse and ensure fair access for all consumers.
 
 > **Source of truth:** Rate limits are defined in code via `rateLimit()` calls in [`backend/src/index.ts`](../backend/src/index.ts) and [`backend/src/routes/auth.routes.ts`](../backend/src/routes/auth.routes.ts). This document is kept in sync manually — when updating rate limits, please update both the code and this document.
 
@@ -67,7 +67,7 @@ Authenticated endpoints (trading, withdrawals) are rate-limited per user ID. Thi
 
 ```bash
 # Normal request
-curl -i https://api.boxmeout.io/api/markets
+curl -i https://api.bankerchanger.io/api/markets
 
 # Response headers (normal):
 # HTTP/1.1 200 OK

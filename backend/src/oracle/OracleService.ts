@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Oracle Service
+// BANKERCHANGER — Oracle Service
 // Responsible for fetching fight results from external sources
 // and submitting them to Market contracts on Stellar.
 // ============================================================
