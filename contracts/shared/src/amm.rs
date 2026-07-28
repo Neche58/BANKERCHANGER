@@ -95,11 +95,11 @@ pub fn compute_odds(
     let new_pool_in = pool_in.checked_add(bet_amount)?;
 
     // Solve invariant for output: pool_out * (k / new_pool_in / other_pool)
-    // For sides A/B: k / new_pool_draw = pool_a * pool_b
-    // For draw: k / new_pool_a = pool_b * pool_draw
+    // For sides A/B: k / (new_pool_draw * pool_a * pool_b)
+    // For draw: k / (new_pool_a * pool_b)
     let other_pool = match side {
         0 | 1 => pool_b.checked_mul(pool_a)?,  // B and A remain the same for A/B bets
-        2 => pool_b.checked_mul(pool_draw)?,   // B and draw remain the same for draw bets
+        2 => pool_b.checked_mul(1)?,           // Only B remains constant for draw bets (multiply by 1 to keep type consistent)
         _ => return None,
     };
 
@@ -295,6 +295,67 @@ mod tests {
         // With symmetric pools, odds should be very similar
         assert!((shares_a - shares_b).abs() < 1000);
         assert!((shares_a - shares_draw).abs() < 1000);
+    }
+
+    #[test]
+    fn test_compute_odds_draw_cfmm_invariant() {
+        // Verify that Draw bet respects the 3-asset CFMM invariant
+        // k = pool_a * pool_b * pool_draw (constant)
+        let pool_a = 1_000_000i128;
+        let pool_b = 1_000_000i128;
+        let pool_draw = 1_000_000i128;
+        let bet_amount = 50_000i128;
+
+        // Initial invariant
+        let k = pool_a * pool_b * pool_draw;
+
+        // Bet on Draw: bettor adds bet_amount to pool_a, receives shares_draw from pool_draw
+        let (shares_draw, _) = compute_odds(pool_a, pool_b, pool_draw, bet_amount, 2).unwrap();
+
+        // After the bet:
+        // new_pool_a = pool_a + bet_amount (bettor adds collateral)
+        // new_pool_b = pool_b (unchanged for draw bet)
+        // new_pool_draw = pool_draw - shares_draw (bettor receives shares)
+        let new_pool_a = pool_a + bet_amount;
+        let new_pool_b = pool_b;
+        let new_pool_draw = pool_draw - shares_draw;
+
+        // Verify the invariant holds
+        let k_new = new_pool_a * new_pool_b * new_pool_draw;
+        assert_eq!(
+            k, k_new,
+            "CFMM invariant violated for Draw bet: k={} != k_new={}",
+            k, k_new
+        );
+    }
+
+    #[test]
+    fn test_compute_odds_draw_shares_correctness() {
+        // Verify that Draw bet shares are correctly calculated
+        // Using the example from the bug report: compute_odds(1_000_000, 1_000_000, 1_000_000, 50_000, 2)
+        let pool_a = 1_000_000i128;
+        let pool_b = 1_000_000i128;
+        let pool_draw = 1_000_000i128;
+        let bet_amount = 50_000i128;
+
+        let (shares_draw, _) = compute_odds(pool_a, pool_b, pool_draw, bet_amount, 2).unwrap();
+
+        // Manual calculation:
+        // k = 1_000_000 * 1_000_000 * 1_000_000 = 1e18
+        // new_pool_a = 1_000_000 + 50_000 = 1_050_000
+        // new_pool_draw = k / (new_pool_a * pool_b) = 1e18 / (1_050_000 * 1_000_000)
+        //               = 1e18 / 1_050_000_000_000 ≈ 952_380.95
+        // shares_out = pool_draw - new_pool_draw ≈ 1_000_000 - 952_380 = 47_619 (approx, due to integer division)
+
+        let k = pool_a as i128 * pool_b as i128 * pool_draw as i128;
+        let new_pool_a = pool_a + bet_amount;
+        let new_pool_draw_numerator = k / (new_pool_a * pool_b);
+        let expected_shares = pool_draw - new_pool_draw_numerator;
+
+        assert_eq!(shares_draw, expected_shares);
+        // Shares should be reasonable (not zero, not huge)
+        assert!(shares_draw > 0);
+        assert!(shares_draw < bet_amount * 2); // Sanity check
     }
 
     #[test]
