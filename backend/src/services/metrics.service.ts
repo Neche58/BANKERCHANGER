@@ -3,7 +3,7 @@ import { Counter, Histogram, Gauge, register, collectDefaultMetrics } from 'prom
 // Collect default Node.js metrics (GC, event loop, memory, etc.)
 collectDefaultMetrics({ register });
 
-register.setDefaultLabels({ app: 'boxmeout' });
+register.setDefaultLabels({ app: 'bankerchanger' });
 
 // ── HTTP Request Metrics ──────────────────────────────────────────────────────
 

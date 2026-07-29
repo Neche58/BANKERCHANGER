@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-const LS_KEY = 'boxmeout_theme';
+const LS_KEY = 'bankerchanger_theme';
 
 function getInitialTheme(): 'dark' | 'light' {
   if (typeof window === 'undefined') return 'dark';

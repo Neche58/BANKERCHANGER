@@ -3,7 +3,7 @@ import * as QRCode from 'qrcode';
 
 export function generateSecret(accountName: string): { secret: string; otpauthUrl: string } {
   const totp = new OTPAuth.TOTP({
-    issuer: 'BOXMEOUT',
+    issuer: 'BANKERCHANGER',
     label: accountName,
     algorithm: 'SHA1',
     digits: 6,

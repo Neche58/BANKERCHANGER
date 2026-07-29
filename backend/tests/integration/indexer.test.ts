@@ -2,7 +2,7 @@
  * Integration tests for StellarIndexer handlers.
  *
  * Requires a running PostgreSQL instance pointed to by DATABASE_URL.
- * Default: postgresql://user:password@localhost:5433/boxmeout_test
+ * Default: postgresql://bankerchanger:bankerchanger@localhost:5433/bankerchanger_test
  * Start with: docker compose --profile test up -d postgres-test
  */
 
@@ -19,7 +19,8 @@ import {
 } from '../../src/indexer/StellarIndexer';
 
 // Point the pool at the test DB
-process.env.DATABASE_URL = process.env.DATABASE_URL ?? '';
+process.env.DATABASE_URL =
+  process.env.DATABASE_URL ?? 'postgresql://bankerchanger:bankerchanger@localhost:5433/bankerchanger_test';
 
 // Re-import pool AFTER env is set
 // eslint-disable-next-line @typescript-eslint/no-var-requires

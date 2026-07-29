@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: BoxMeOut API
+  title: BANKERCHANGER API
   version: 0.2.0
-  description: REST API for the BoxMeOut decentralized boxing prediction market.
+  description: REST API for the BANKERCHANGER decentralized boxing prediction market.
 
 servers:
   - url: http://localhost:3001
@@ -25,6 +25,48 @@ components:
       properties:
         success: { type: boolean, example: false }
         message: { type: string }
+
+    ErrorResponse400:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string, description: "Bad request. Invalid query parameters, request body, or format." }
+        code: { type: string, example: "INVALID_REQUEST" }
+      required: [success, message]
+
+    ErrorResponse401:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string, description: "Missing, invalid, or expired authentication credentials." }
+        code: { type: string, example: "UNAUTHORIZED" }
+      required: [success, message]
+
+    ErrorResponse403:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string, description: "Authenticated but insufficient permissions for this resource." }
+        code: { type: string, example: "FORBIDDEN" }
+      required: [success, message]
+
+    ErrorResponse429:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string, description: "Rate limit exceeded. Check Retry-After header for reset time." }
+        code: { type: string, example: "RATE_LIMIT_EXCEEDED" }
+        retryAfter: { type: integer, description: "Seconds until the rate limit window resets." }
+      required: [success, message]
+
+    ErrorResponse500:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string, description: "Internal server error. Please try again later." }
+        code: { type: string, example: "INTERNAL_SERVER_ERROR" }
+        requestId: { type: string, description: "Unique identifier for this error instance for debugging." }
+      required: [success, message]
 
     UserDTO:
       type: object
@@ -252,11 +294,26 @@ paths:
                 properties:
                   userId:   { type: string }
                   message:  { type: string }
+        '400':
+          description: Invalid email format or password too short
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '409':
           description: Email already registered
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /auth/login:
     post:
@@ -286,15 +343,25 @@ paths:
                   tempToken:    { type: string, description: Present only when 2FA is required }
                   requires2FA:  { type: boolean }
         '400':
-          description: Missing credentials
+          description: Missing or invalid credentials
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
-          description: Invalid credentials
+          description: Invalid email or password
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /auth/forgot-password:
     post:
@@ -319,6 +386,21 @@ paths:
                 type: object
                 properties:
                   message: { type: string }
+        '400':
+          description: Invalid email format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /auth/reset-password:
     post:
@@ -348,7 +430,17 @@ paths:
           description: Invalid or expired token
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /auth/2fa/setup:
     post:
@@ -371,7 +463,17 @@ paths:
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /auth/2fa/enable:
     post:
@@ -392,11 +494,26 @@ paths:
       responses:
         '200':
           description: 2FA enabled
+        '400':
+          description: Invalid OTP format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized or invalid OTP
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /auth/2fa/disable:
     post:
@@ -417,11 +534,26 @@ paths:
       responses:
         '200':
           description: 2FA disabled
+        '400':
+          description: Invalid OTP format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized or invalid OTP
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /auth/2fa/verify:
     post:
@@ -448,11 +580,26 @@ paths:
                 properties:
                   accessToken:  { type: string }
                   refreshToken: { type: string }
+        '400':
+          description: Invalid request format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Invalid temp token or OTP
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   # ---------------------------------------------------------------------------
   # Users
@@ -478,7 +625,17 @@ paths:
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
     patch:
       summary: Update authenticated user's profile
       operationId: updateMyProfile
@@ -508,11 +665,31 @@ paths:
                 properties:
                   success: { type: boolean }
                   data:    { $ref: '#/components/schemas/UserDTO' }
+        '400':
+          description: Invalid profile data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
         '409':
           description: Username already taken
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/users/{id}:
     get:
@@ -534,11 +711,26 @@ paths:
                 properties:
                   success: { type: boolean }
                   data:    { $ref: '#/components/schemas/UserDTO' }
+        '400':
+          description: Invalid user ID format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '404':
           description: User not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/users:
     get:
@@ -585,11 +777,31 @@ paths:
                       total: { type: integer }
                       page:  { type: integer }
                       limit: { type: integer }
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
         '403':
           description: Admin access required
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/users/{id}/suspend:
     patch:
@@ -606,11 +818,31 @@ paths:
       responses:
         '200':
           description: User suspended
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: User not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/users/{id}/role:
     patch:
@@ -653,12 +885,32 @@ paths:
           description: Invalid role
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: User not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   # ---------------------------------------------------------------------------
   # Platform
@@ -674,6 +926,16 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PlatformStats' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   # ---------------------------------------------------------------------------
   # Markets
@@ -719,7 +981,17 @@ paths:
           description: Invalid query parameters
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/markets/{market_id}:
     get:
@@ -737,11 +1009,26 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Market' }
+        '400':
+          description: Invalid market ID format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/markets/{market_id}/bets:
     get:
@@ -776,11 +1063,26 @@ paths:
                   total: { type: integer }
                   page:  { type: integer }
                   limit: { type: integer }
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/markets/{market_id}/odds:
     get:
@@ -798,11 +1100,26 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MarketOdds' }
+        '400':
+          description: Invalid market ID format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/markets/{market_id}/stats:
     get:
@@ -820,11 +1137,26 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MarketStats' }
+        '400':
+          description: Invalid market ID format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/markets/{market_id}/simulate:
     get:
@@ -854,7 +1186,22 @@ paths:
           description: Invalid parameters
           content:
             application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '404':
+          description: Market not found
+          content:
+            application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/markets/{market_id}/resolve:
     post:
@@ -886,16 +1233,36 @@ paths:
                 type: object
                 properties:
                   tx_hash: { type: string }
+        '400':
+          description: Invalid outcome or market state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   # ---------------------------------------------------------------------------
   # Bets
@@ -934,7 +1301,17 @@ paths:
           description: Invalid Stellar address
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/bets/{bettor_address}/stats:
     get:
@@ -956,7 +1333,17 @@ paths:
           description: Invalid Stellar address
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/portfolio/{address}:
     get:
@@ -978,7 +1365,17 @@ paths:
           description: Invalid Stellar address
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/claims:
     post:
@@ -1008,7 +1405,17 @@ paths:
           description: No winnings to claim
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/claims/refund:
     post:
@@ -1038,7 +1445,17 @@ paths:
           description: Market not cancelled or no bet found
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   # ---------------------------------------------------------------------------
   # Oracle
@@ -1078,12 +1495,22 @@ paths:
           description: Invalid request body
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Missing or invalid oracle API key
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/oracle/reports/{match_id}:
     get:
@@ -1103,11 +1530,26 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/OracleReport' }
+        '400':
+          description: Invalid match ID format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '404':
           description: No reports found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   # ---------------------------------------------------------------------------
   # Disputes
@@ -1144,17 +1586,27 @@ paths:
           description: Invalid market status
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
         '409':
           description: Dispute already exists for this market
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
     get:
       summary: List all disputes (admin only)
       operationId: listDisputesApi
@@ -1188,11 +1640,31 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Dispute' }
                   pagination: { $ref: '#/components/schemas/Pagination' }
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
         '403':
           description: Admin access required
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/disputes/{disputeId}:
     get:
@@ -1214,11 +1686,26 @@ paths:
                 properties:
                   success: { type: boolean }
                   data:    { $ref: '#/components/schemas/Dispute' }
+        '400':
+          description: Invalid dispute ID format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '404':
           description: Dispute not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/disputes/{disputeId}/review:
     patch:
@@ -1251,16 +1738,36 @@ paths:
                 properties:
                   success: { type: boolean }
                   data:    { $ref: '#/components/schemas/Dispute' }
+        '400':
+          description: Invalid request or dispute state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
         '403':
           description: Admin access required
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: Dispute not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/disputes/{disputeId}/resolve:
     patch:
@@ -1302,17 +1809,32 @@ paths:
           description: Invalid action or missing fields
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
         '403':
           description: Admin access required
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: Dispute not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   # ---------------------------------------------------------------------------
   # Admin
@@ -1339,7 +1861,22 @@ paths:
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/dispute/{market_id}:
     post:
@@ -1371,16 +1908,36 @@ paths:
                 type: object
                 properties:
                   tx_hash: { type: string }
+        '400':
+          description: Invalid market ID or reason
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/dispute/{market_id}/investigate:
     post:
@@ -1397,16 +1954,36 @@ paths:
       responses:
         '200':
           description: Dispute under investigation
+        '400':
+          description: Invalid market ID or state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/resolve-dispute/{market_id}:
     post:
@@ -1441,16 +2018,36 @@ paths:
                 type: object
                 properties:
                   tx_hash: { type: string }
+        '400':
+          description: Invalid action or missing fields
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/cancel/{market_id}:
     post:
@@ -1482,16 +2079,36 @@ paths:
                 type: object
                 properties:
                   tx_hash: { type: string }
+        '400':
+          description: Invalid market ID or reason
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/cancel/{market_id}/refunds:
     post:
@@ -1508,16 +2125,36 @@ paths:
       responses:
         '200':
           description: Refunds processed
+        '400':
+          description: Invalid market ID or state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
         '404':
           description: Market not found
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/markets/bulk-pause:
     post:
@@ -1546,11 +2183,31 @@ paths:
                 type: object
                 properties:
                   paused: { type: integer }
+        '400':
+          description: Invalid market IDs or request format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/markets/bulk-cancel:
     post:
@@ -1579,11 +2236,31 @@ paths:
                 type: object
                 properties:
                   cancelled: { type: integer }
+        '400':
+          description: Invalid market IDs or request format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/export/users:
     get:
@@ -1602,7 +2279,22 @@ paths:
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/export/trades:
     get:
@@ -1624,11 +2316,31 @@ paths:
           content:
             text/csv:
               schema: { type: string }
+        '400':
+          description: Invalid date format
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/export/treasury:
     get:
@@ -1647,7 +2359,22 @@ paths:
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }
 
   /api/admin/export/request:
     post:
@@ -1681,9 +2408,24 @@ paths:
           description: Invalid request
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse400' }
         '401':
           description: Unauthorized
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema: { $ref: '#/components/schemas/ErrorResponse401' }
+        '403':
+          description: Admin access required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse403' }
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse429' }
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse500' }

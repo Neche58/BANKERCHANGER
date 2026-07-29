@@ -1,5 +1,5 @@
 //! ============================================================
-//! BOXMEOUT — Contract Events
+//! BANKERCHANGER — Contract Events
 //! All emitted events are defined here for consistency.
 //! ============================================================
 

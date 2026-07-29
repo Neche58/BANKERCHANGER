@@ -13,7 +13,7 @@ describe('totp.service', () => {
     it('returns a base32 secret and otpauth URL', () => {
       expect(secret).toMatch(/^[A-Z2-7]+=*$/);
       expect(otpauthUrl).toMatch(/^otpauth:\/\/totp\//);
-      expect(otpauthUrl).toContain('BOXMEOUT');
+      expect(otpauthUrl).toContain('BANKERCHANGER');
     });
   });
 

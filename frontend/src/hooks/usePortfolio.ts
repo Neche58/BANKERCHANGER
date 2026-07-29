@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — usePortfolio Hook
+// BANKERCHANGER — usePortfolio Hook
 // ============================================================
 
 import { useState, useEffect, useCallback } from 'react';
@@ -89,8 +89,8 @@ export function usePortfolio(): UsePortfolioResult {
   // Refresh when useClaimWinnings hook fires a successful claim
   useEffect(() => {
     const handler = () => { load(); };
-    window.addEventListener('boxmeout:claim_success', handler);
-    return () => window.removeEventListener('boxmeout:claim_success', handler);
+    window.addEventListener('bankerchanger:claim_success', handler);
+    return () => window.removeEventListener('bankerchanger:claim_success', handler);
   }, [load]);
 
   const runClaim = useCallback(async (fn: () => Promise<string>) => {

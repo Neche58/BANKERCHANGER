@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — useMarket Hook
+// BANKERCHANGER — useMarket Hook
 // ============================================================
 
 import { useState, useEffect } from 'react';
@@ -90,8 +90,8 @@ export function useMarket(market_id: string): UseMarketResult {
       }
     };
 
-    window.addEventListener('boxmeout:claim_success', handler);
-    return () => window.removeEventListener('boxmeout:claim_success', handler);
+    window.addEventListener('bankerchanger:claim_success', handler);
+    return () => window.removeEventListener('bankerchanger:claim_success', handler);
   }, [market_id]);
 
   return { market, isLoading, error, isNotFound };

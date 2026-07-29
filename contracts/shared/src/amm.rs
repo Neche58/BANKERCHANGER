@@ -1,5 +1,5 @@
 //! ============================================================
-//! BOXMEOUT — AMM Math Module
+//! BANKERCHANGER — AMM Math Module
 //! Automated Market Maker calculations for pool operations.
 //! ============================================================
 
@@ -303,6 +303,141 @@ mod tests {
         // Impact should always be between 0 and 10000 BPS
         assert!(impact >= 0);
         assert!(impact <= 10000);
+    }
+
+    // ── Property-based fuzz tests: overflow/underflow near i128 boundaries ──────
+
+    #[test]
+    fn test_compute_odds_near_i128_max_does_not_panic() {
+        // Near-max pool values — the function must return None rather than panic
+        let near_max = i128::MAX / 3; // large enough so product doesn't overflow in the first mul
+        let result = compute_odds(near_max, near_max, near_max, 1_000_000, 0);
+        // Must not panic; may succeed or return None
+        if let Some((shares, impact)) = result {
+            assert!(shares > 0);
+            assert!(impact <= 10000);
+        }
+    }
+
+    #[test]
+    fn test_compute_odds_overflow_returns_none() {
+        // Pool product k = pool_a * pool_b * pool_draw will overflow i128
+        // i128::MAX / 2 cubed is way over i128::MAX
+        let big = i128::MAX / 2;
+        let result = compute_odds(big, big, big, 1, 0);
+        assert_eq!(result, None, "Overflow must return None, not panic");
+    }
+
+    #[test]
+    fn test_compute_odds_extreme_bet_amount_does_not_panic() {
+        // Bet amount near i128::MAX — pool_in + bet_amount may overflow
+        let result = compute_odds(1_000_000, 1_000_000, 1_000_000, i128::MAX, 0);
+        // Must not panic; overflow should return None
+        assert_eq!(result, None, "i128::MAX bet must return None gracefully");
+    }
+
+    #[test]
+    fn test_compute_odds_near_zero_pools() {
+        // Pools at 1 (minimum valid) — should still work
+        let result = compute_odds(1, 1, 1, 1, 0);
+        // With pools=1, the math may or may not produce valid output
+        // The key invariant: must not panic
+        if let Some((shares, impact)) = result {
+            assert!(shares > 0);
+            assert!(impact <= 10000);
+        }
+    }
+
+    #[test]
+    fn test_compute_odds_negative_pool_rejected() {
+        assert_eq!(compute_odds(-1, 1_000_000, 1_000_000, 10_000, 0), None);
+        assert_eq!(compute_odds(1_000_000, -1, 1_000_000, 10_000, 0), None);
+        assert_eq!(compute_odds(1_000_000, 1_000_000, -1, 10_000, 0), None);
+    }
+}
+
+/// Property-based fuzz tests exercising random pool sizes across the full i128 range.
+/// These guard against checked-arithmetic panics that hand-crafted tests miss.
+#[cfg(test)]
+mod proptest_tests {
+    use proptest::prelude::*;
+    use super::compute_odds;
+
+    proptest! {
+        /// For any random positive pool values and valid bet, compute_odds must never panic.
+        #[test]
+        fn fuzz_compute_odds_never_panics(
+            pool_a in 1i128..=i128::MAX,
+            pool_b in 1i128..=i128::MAX,
+            pool_draw in 1i128..=i128::MAX,
+            bet_amount in 1i128..=1_000_000_000_000i128,
+            side in 0u8..=2u8,
+        ) {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                compute_odds(pool_a, pool_b, pool_draw, bet_amount, side)
+            }));
+            // Must never panic — either return Some or None
+            assert!(result.is_ok(), "compute_odds panicked with pools ({pool_a}, {pool_b}, {pool_draw}), bet {bet_amount}, side {side}");
+        }
+
+        /// For random pool sizes near i128::MAX, the function must not panic.
+        #[test]
+        fn fuzz_compute_odds_near_max_never_panics(
+            offset_a in 0i128..=1_000_000i128,
+            offset_b in 0i128..=1_000_000i128,
+            offset_draw in 0i128..=1_000_000i128,
+            bet_amount in 1i128..=1_000_000_000i128,
+            side in 0u8..=2u8,
+        ) {
+            let pool_a = i128::MAX.saturating_sub(offset_a).max(1);
+            let pool_b = i128::MAX.saturating_sub(offset_b).max(1);
+            let pool_draw = i128::MAX.saturating_sub(offset_draw).max(1);
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                compute_odds(pool_a, pool_b, pool_draw, bet_amount, side)
+            }));
+            assert!(result.is_ok(), "compute_odds panicked near MAX with pools ({pool_a}, {pool_b}, {pool_draw})");
+        }
+
+        /// For any valid inputs that succeed, the output invariants hold.
+        #[test]
+        fn fuzz_compute_odds_output_invariants(
+            pool_a in 1i128..=1_000_000_000_000i128,
+            pool_b in 1i128..=1_000_000_000_000i128,
+            pool_draw in 1i128..=1_000_000_000_000i128,
+            bet_amount in 1i128..=1_000_000_000i128,
+            side in 0u8..=2u8,
+        ) {
+            if let Some((shares, impact)) = compute_odds(pool_a, pool_b, pool_draw, bet_amount, side) {
+                // shares must be positive
+                assert!(shares > 0, "shares must be > 0, got {shares}");
+                // shares must not exceed the output pool
+                let out_pool = match side {
+                    0 => pool_a,
+                    1 => pool_b,
+                    2 => pool_draw,
+                    _ => unreachable!(),
+                };
+                assert!(shares < out_pool, "shares {shares} must be < out_pool {out_pool}");
+                // price impact must be in [0, 10000] bps
+                assert!(impact <= 10000, "impact {impact} must be <= 10000");
+            }
+        }
+
+        /// Random pool sizes across the full i128 range — must never panic.
+        #[test]
+        fn fuzz_full_i128_range_never_panics(
+            pool_a in any::<i128>(),
+            pool_b in any::<i128>(),
+            pool_draw in any::<i128>(),
+            bet_amount in any::<i128>(),
+            side in 0u8..=3u8,
+        ) {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                compute_odds(pool_a, pool_b, pool_draw, bet_amount, side)
+            }));
+            assert!(result.is_ok(), "compute_odds panicked with any i128 inputs");
+        }
     }
 
     // ── calc_max_trade tests ────────────────────────────────────────────────────

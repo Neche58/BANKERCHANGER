@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Shared Frontend Types
+// BANKERCHANGER — Shared Frontend Types
 // ============================================================
 // NOTE: Market, Bet, Portfolio, MarketStats are generated from
 // the backend OpenAPI spec (backend/openapi.yaml).

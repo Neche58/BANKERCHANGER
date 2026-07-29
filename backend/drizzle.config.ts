@@ -5,6 +5,6 @@ export default {
   out: './migrations',
   driver: 'pg',
   dbCredentials: {
-    connectionString: process.env.DATABASE_URL,
+    connectionString: process.env.DATABASE_URL || 'postgresql://bankerchanger:bankerchanger@localhost:5432/bankerchanger',
   },
 } satisfies Config;

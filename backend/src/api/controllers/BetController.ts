@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Bet Controller
+// BANKERCHANGER — Bet Controller
 // Claim endpoints for winning bettors.
 // ============================================================
 

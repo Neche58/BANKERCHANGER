@@ -1,6 +1,6 @@
 #![no_std]
 //! ============================================================
-//! BOXMEOUT — Treasury Contract (Security-Audited)
+//! BANKERCHANGER — Treasury Contract (Security-Audited)
 //! All fund-moving functions follow Checks-Effects-Interactions.
 //! require_auth() is always the first call.
 //! ============================================================

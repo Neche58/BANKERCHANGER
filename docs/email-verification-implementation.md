@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the email verification feature implementation for BOXMEOUT. The feature ensures users verify their email address before they can place trades or withdraw funds.
+This document describes the email verification feature implementation for BANKERCHANGER. The feature ensures users verify their email address before they can place trades or withdraw funds.
 
 ## Architecture
 

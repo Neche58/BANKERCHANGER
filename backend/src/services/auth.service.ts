@@ -80,8 +80,16 @@ function signReset(userId: string): string {
   } as jwt.SignOptions);
 }
 
-function verifyJwt(token: string, expectedType: string): jwt.JwtPayload {
-  const payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+export function verifyJwt(token: string, expectedType: string): jwt.JwtPayload {
+  let payload: jwt.JwtPayload;
+  try {
+    payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      throw new AppError(401, 'Token has expired');
+    }
+    throw new AppError(401, 'Invalid token');
+  }
   if (payload.type !== expectedType) throw new AppError(401, 'Invalid token type');
   return payload;
 }
@@ -205,6 +213,22 @@ export async function login(
 
 // ---------------------------------------------------------------------------
 // Password reset flow
+// ---------------------------------------------------------------------------
+//
+// Design note (#357): password reset tokens are stored ONLY in the
+// `password_reset_tokens` DB table. Redis is intentionally NOT used here.
+//
+// Rationale: using the DB as the single source of truth means a Redis flush
+// or restart cannot make a consumed token reusable. Single-use enforcement
+// is achieved by deleting the row in step 4 of resetPassword() before
+// touching the user record.
+//
+// Redis in this file is only used for:
+//   • email_verification tokens  (short-lived, loss-tolerant — user can re-request)
+//   • session revocation tombstones (blockOldSessions) — intentional fast-path
+//     to reject in-flight JWTs after a password change without a DB round-trip.
+//
+// Do NOT add Redis writes for password reset tokens here.
 // ---------------------------------------------------------------------------
 
 /**

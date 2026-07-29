@@ -1,16 +1,17 @@
-# BoxMeOut Operational Runbook
+# BANKERCHANGER Operational Runbook
 
 ## Overview
 
-This runbook provides step-by-step procedures for responding to common production incidents in the BoxMeOut platform. Each incident type includes observable symptoms, diagnostic procedures, resolution steps, and escalation protocols.
+This runbook provides step-by-step procedures for responding to common production incidents in the BANKERCHANGER platform. Each incident type includes observable symptoms, diagnostic procedures, resolution steps, and escalation protocols.
 
 **Table of Contents:**
 1. [Oracle Failures & Unresolved Markets](#oracle-failures--unresolved-markets)
-2. [Treasury Withdrawal Limits Exceeded](#treasury-withdrawal-limits-exceeded)
-3. [Contract Pause Events](#contract-pause-events)
-4. [High Dispute Volumes](#high-dispute-volumes)
-5. [RPC Node Outages](#rpc-node-outages)
-6. [Quick Reference: CLI Commands](#quick-reference-cli-commands)
+2. [Oracle Resolution Failure (Sustained) — User Funds Locked](#oracle-resolution-failure-sustained--user-funds-locked)
+3. [Treasury Withdrawal Limits Exceeded](#treasury-withdrawal-limits-exceeded)
+4. [Contract Pause Events](#contract-pause-events)
+5. [High Dispute Volumes](#high-dispute-volumes)
+6. [RPC Node Outages](#rpc-node-outages)
+7. [Quick Reference: CLI Commands](#quick-reference-cli-commands)
 
 ---
 
@@ -84,6 +85,217 @@ stellar contract invoke \
 - **Level 1 (0-30 min):** Monitor and contact oracle provider support
 - **Level 2 (30-60 min):** Notify platform administrators, prepare market force-resolution
 - **Level 3 (>1 hour):** Invoke emergency pause, initiate user communications, request oracle emergency support
+
+---
+
+## Oracle Resolution Failure (Sustained) — User Funds Locked
+
+### Observable Symptoms
+
+- Multiple markets remain in "locked" state for >24 hours past `scheduled_at`
+- Oracle repeatedly returns errors on submission (`/api/oracle` 5xx or timeout on every attempt)
+- User funds are locked in unresolved markets — users cannot claim winnings
+- Backend cron logs show repeated failures: `autoResolution cron: oracle submit failed for market {id}`
+- Dispute count spikes as users flag unresolved markets
+- Monitoring alerts fire for `locked_markets_past_due > 0` for extended period
+
+### Detection
+
+**Step 1: Identify stuck markets**
+```bash
+# Database query: markets past resolution time still locked
+psql $DATABASE_URL <<SQL
+SELECT id, title, scheduled_at, status, outcome,
+       EXTRACT(EPOCH FROM (NOW() - scheduled_at)) / 3600 AS hours_past_due
+FROM markets
+WHERE status = 'locked'
+  AND scheduled_at < NOW() - INTERVAL '1 hour'
+ORDER BY scheduled_at ASC;
+SQL
+```
+
+**Step 2: Confirm oracle is unreachable**
+```bash
+# Test oracle health endpoint
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/oracle/health
+
+# Check Horizon for recent oracle account activity
+curl -s "https://horizon-testnet.stellar.org/accounts/{ORACLE_ADDRESS}/operations?limit=5&order=desc" | jq '.records[].type'
+```
+
+**Step 3: Estimate locked fund impact**
+```bash
+# Total user funds locked in unresolved markets
+psql $DATABASE_URL <<SQL
+SELECT COUNT(DISTINCT user_id) AS affected_users,
+       SUM(amount) / 10000000.0 AS total_locked_xlm
+FROM bets
+WHERE market_id IN (
+  SELECT id FROM markets
+  WHERE status = 'locked' AND scheduled_at < NOW() - INTERVAL '1 hour'
+);
+SQL
+```
+
+### Manual Resolution Steps
+
+**Option A: Admin Force Resolution (Recommended — when outcome is known)**
+
+Use when the boxing match result is publicly available but oracle failed to submit.
+
+```bash
+# 1. Verify the correct outcome from an authoritative source
+#    (official boxing commission, major sports sites, event promoter)
+
+# 2. Force resolve the market on-chain
+stellar contract invoke \
+    --id {MARKET_FACTORY_ADDRESS} \
+    --source {ADMIN_SECRET_KEY} \
+    --network mainnet \
+    -- admin_force_resolve \
+    --market-id {market_id} \
+    --outcome {fighter_a|fighter_b|draw|no_contest}
+
+# 3. Verify resolution on-chain
+stellar contract invoke \
+    --id {MARKET_FACTORY_ADDRESS} \
+    --source {ADMIN_SECRET_KEY} \
+    --network mainnet \
+    -- query_market \
+    --market-id {market_id} | jq '.outcome'
+
+# 4. Verify payouts are enabled (status changes from "locked" to "resolved")
+curl -s http://localhost:3001/api/markets/{market_id} | jq '.status'
+```
+
+**Option B: Market Cancellation (Fallback — when outcome cannot be verified)**
+
+Use when the event was cancelled, postponed indefinitely, or outcome is disputed beyond resolution.
+
+```bash
+# 1. Cancel the market and refund all bettors
+stellar contract invoke \
+    --id {MARKET_FACTORY_ADDRESS} \
+    --source {ADMIN_SECRET_KEY} \
+    --network mainnet \
+    -- admin_cancel_market \
+    --market-id {market_id} \
+    --reason "oracle_unavailable"
+
+# 2. Verify cancellation
+stellar contract invoke \
+    --id {MARKET_FACTORY_ADDRESS} \
+    --source {ADMIN_SECRET_KEY} \
+    --network mainnet \
+    -- query_market \
+    --market-id {market_id} | jq '.status'
+# Expected: "cancelled"
+
+# 3. Confirm treasury has sufficient balance for refunds
+stellar contract invoke \
+    --id {TREASURY_ADDRESS} \
+    --source {ADMIN_SECRET_KEY} \
+    --network mainnet \
+    -- get_treasury_state | jq '.balance_stroops'
+```
+
+**Option C: Batch Resolution Script (for many stuck markets)**
+
+```bash
+# Run the batch resolution helper (if available)
+node scripts/batch-resolve-markets.js \
+    --network mainnet \
+    --outcome-source manual \
+    --markets-file /tmp/stuck_markets.json
+
+# Or manually iterate:
+psql $DATABASE_URL -t -A -c \
+  "SELECT id FROM markets WHERE status = 'locked' AND scheduled_at < NOW() - INTERVAL '24 hours';" \
+  | while read -r market_id; do
+    echo "Resolving market: $market_id"
+    # Force resolve or cancel each market
+  done
+```
+
+### Admin Override Commands
+
+| Command | Purpose | Risk Level |
+|---------|---------|-----------|
+| `admin_force_resolve` | Resolve a single market to a specific outcome | Medium — verify outcome first |
+| `admin_cancel_market` | Cancel market and trigger refunds | High — funds returned but user trust impacted |
+| `admin_pause` | Halt all new bets and market creation | Critical — freezes entire platform |
+| `admin_unpause` | Resume platform operations after fix | Critical — unpause only after verifying oracle recovery |
+
+**Before using any admin override:**
+1. Document the reason in the admin audit log
+2. Take a database snapshot of affected markets and bets
+3. Notify the team in the incident channel
+4. Prepare a user communication draft
+
+### Oracle Recovery & Failover
+
+**Step 1: Attempt oracle recovery**
+```bash
+# Restart oracle service if self-hosted
+ssh user@oracle-host "systemctl restart boxmeout-oracle"
+
+# Check oracle logs
+ssh user@oracle-host "journalctl -u boxmeout-oracle -n 100 --no-pager"
+```
+
+**Step 2: Switch to backup oracle (if configured)**
+```bash
+# Update oracle address in environment
+export ORACLE_ADDRESS={BACKUP_ORACLE_ADDRESS}
+
+# Restart backend to pick up new oracle config
+systemctl restart boxmeout-backend
+```
+
+**Step 3: Verify oracle is submitting**
+```bash
+# Watch for new oracle submissions
+watch -n 30 "curl -s http://localhost:3001/api/markets?status=resolved&limit=5 | jq '.markets[].resolvedAt'"
+```
+
+### Escalation Protocol
+
+| Level | Timeframe | Action |
+|-------|-----------|--------|
+| **Level 1** | 0-2 hours | Monitor oracle health; check if issue is transient RPC/node related |
+| **Level 2** | 2-6 hours | Notify platform administrators; begin manual resolution for time-critical markets; draft user notification |
+| **Level 3** | 6-24 hours | Pause new market creation via `admin_pause`; resolve all overdue markets manually; publish incident post to users |
+| **Level 4** | >24 hours | Executive escalation; consider switching oracle provider; publish post-mortem; assess user compensation if needed |
+
+### User Communication Template
+
+```
+Subject: [BoxMeOut] Market Resolution Delay — {market_title}
+
+We are experiencing a delay in resolving the market for "{market_title}".
+
+What happened: The oracle service responsible for submitting event results
+has encountered an issue.
+
+What we're doing:
+- [If known outcome] We are manually resolving this market with the verified result.
+- [If unknown] We are working to obtain the verified result and will resolve shortly.
+
+Your funds remain safe on-chain. Payouts will be processed as soon as the
+market is resolved. No action is required from you.
+
+We will provide an update within {timeframe}.
+
+— BoxMeOut Team
+```
+
+### Prevention
+
+- **Oracle redundancy:** Configure at least 2 oracle addresses in `ORACLE_ADDRESSES`
+- **Health monitoring:** Set up uptime checks on oracle endpoint with alerting
+- **Auto-resolution cron:** Ensure `autoResolution.cron.ts` is running and logs are monitored
+- **Scheduled market lock:** Verify markets are locked before `scheduled_at` via `autoLockCron`
+- **Runbook drills:** Practice oracle failure scenarios quarterly
 
 ---
 
