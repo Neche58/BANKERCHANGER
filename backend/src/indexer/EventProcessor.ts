@@ -42,6 +42,13 @@ export class StellarEventProcessor implements EventProcessor {
         await this.handleWinningsClaimed(event);
       } else if (eventType === 'refund_claimed') {
         await this.handleRefundClaimed(event);
+      } else {
+        // Log unknown event types to prevent silent data loss
+        console.warn(
+          `[Indexer] Unknown event type "${eventType}" on contract ${event.contract_address} ` +
+          `(tx: ${event.tx_hash}, ledger: ${event.ledger_sequence}). ` +
+          `Full event payload: ${JSON.stringify(event)}`,
+        );
       }
     } catch (err) {
       console.error(`Error processing event ${event.tx_hash}:`, err);
