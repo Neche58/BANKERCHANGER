@@ -38,7 +38,7 @@ process.env.DATABASE_URL =
 const ORACLE_SECRET = 'SCZANGBA5RLMPI7JMTP2C6GKMT2O6JVEAMOSYVBMSHAHJQERPIFOQKR';
 process.env.ORACLE_PRIVATE_KEY = ORACLE_SECRET;
 
-// Boxing API env vars (values don't matter — fetch is mocked below)
+// Boxing API env vars (values don't matter â€” fetch is mocked below)
 process.env.BOXING_API_URL = 'https://api.boxing-mock.test';
 process.env.BOXING_API_KEY = 'test-api-key';
 
@@ -173,7 +173,7 @@ describe('Oracle Resolution Pipeline', () => {
       const calledUrl: string = mockFetch.mock.calls[0][0] as string;
       expect(calledUrl).toContain(encodeURIComponent(MATCH_ID));
 
-      // 4. Submit fight result — writes OracleReport row, calls invokeContract
+      // 4. Submit fight result â€” writes OracleReport row, calls invokeContract
       const { invokeContract } = require('../../src/services/StellarService') as {
         invokeContract: jest.Mock;
       };
@@ -230,7 +230,7 @@ describe('Oracle Resolution Pipeline', () => {
       expect(oracleRows.length).toBeGreaterThanOrEqual(1);
       expect(oracleRows[0].outcome).toBe(ORACLE_OUTCOME);
 
-      // 7. WebSocket assertion — publish "resolved" event
+      // 7. WebSocket assertion â€” publish "resolved" event
       const resolvedWsEvent: ActivityEvent = {
         type: 'resolved',
         marketId: MARKET_ID,
