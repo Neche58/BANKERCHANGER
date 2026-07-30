@@ -105,6 +105,13 @@ export async function fetchBetsByAddress(
     throw AppError.badRequest('Invalid Stellar address format');
   }
 
+  if (!Number.isInteger(page) || page < 1) {
+    throw AppError.badRequest('page must be an integer >= 1');
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw AppError.badRequest('limit must be an integer between 1 and 100');
+  }
+
   const offset = (page - 1) * limit;
 
   // Get total count
