@@ -49,10 +49,10 @@ export function useBet(market: Market): UseBetResult {
   }, [side, amount, market]);
 
   const submit = useCallback(async () => {
+    setError(null);
     if (!side || !walletAddress) return;
     const xlm = parseFloat(amount);
     if (!xlm || xlm <= 0) return;
-    setError(null);
     setIsSubmitting(true);
     setTxStatus({ hash: null, status: 'signing', error: null });
     try {
