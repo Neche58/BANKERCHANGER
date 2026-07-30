@@ -20,6 +20,8 @@ pub enum ContractError {
     NotFactory = 3,
     /// Market contract is not registered or approved
     UnregisteredMarket = 6,
+    /// Pending admin transfer proposal has expired
+    PendingAdminExpired = 7,
 
     // ── Market State ───────────────────────────────────────
     /// Requested market ID does not exist
@@ -90,4 +92,8 @@ pub enum ContractError {
     // ── Reentrancy ─────────────────────────────────────────
     /// A claim or refund transfer is already in progress
     ReentrancyGuard = 60,
+
+    // ── Slippage ────────────────────────────────────────────
+    /// Computed shares out are below the caller's min_shares_out tolerance
+    SlippageExceeded = 61,
 }

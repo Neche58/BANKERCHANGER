@@ -11,7 +11,7 @@ const FETCH_SIZE = 500;
 function csvRow(values: unknown[]): string {
   return values.map((v) => {
     const s = v == null ? '' : String(v);
-    return /[,"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    return /[,"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }).join(',') + '\n';
 }
 

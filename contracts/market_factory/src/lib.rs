@@ -14,6 +14,9 @@ const MARKET_COUNT: &str    = "MARKET_COUNT";
 const MARKET_MAP: &str      = "MARKET_MAP";
 const ADMIN: &str           = "ADMIN";
 const PENDING_ADMIN: &str   = "PENDING_ADMIN";
+const PENDING_ADMIN_EXPIRY: &str = "PENDING_ADMIN_EXPIRY";
+/// Two-step admin transfer must be accepted within this window (7 days) or it expires.
+const PENDING_ADMIN_TTL_SECS: u64 = 604_800;
 const ORACLE_WHITELIST: &str = "ORACLE_WHITELIST";
 const PAUSED: &str          = "PAUSED";
 const DEFAULT_CONFIG: &str  = "DEFAULT_CONFIG";
@@ -405,18 +408,22 @@ impl MarketFactory {
         current_admin.require_auth();
         Self::require_admin(&env, &current_admin)?;
 
+        let expiry = env.ledger().timestamp().saturating_add(PENDING_ADMIN_TTL_SECS);
         env.storage().persistent().set(&PENDING_ADMIN, &new_admin);
+        env.storage().persistent().set(&PENDING_ADMIN_EXPIRY, &expiry);
         boxmeout_shared::emit_admin_proposed(&env, current_admin, new_admin);
         Ok(())
     }
 
     /// Completes the two-step admin transfer.
     ///
-    /// Must be called by the exact address stored in `PENDING_ADMIN`.
-    /// Clears `PENDING_ADMIN` and promotes the caller to `ADMIN`.
+    /// Must be called by the exact address stored in `PENDING_ADMIN`, before
+    /// `PENDING_ADMIN_EXPIRY` elapses. Clears `PENDING_ADMIN` and promotes the
+    /// caller to `ADMIN`.
     ///
     /// # Errors
     /// - `NotAdmin`: No pending proposal exists, or caller is not the pending admin
+    /// - `PendingAdminExpired`: The proposal window has elapsed
     pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), ContractError> {
         new_admin.require_auth();
 
@@ -429,6 +436,16 @@ impl MarketFactory {
             return Err(ContractError::NotAdmin);
         }
 
+        let expiry: u64 = env
+            .storage().persistent()
+            .get(&PENDING_ADMIN_EXPIRY)
+            .ok_or(ContractError::NotAdmin)?;
+        if env.ledger().timestamp() > expiry {
+            env.storage().persistent().remove(&PENDING_ADMIN);
+            env.storage().persistent().remove(&PENDING_ADMIN_EXPIRY);
+            return Err(ContractError::PendingAdminExpired);
+        }
+
         let old_admin: Address = env
             .storage().persistent()
             .get(&ADMIN)
@@ -437,6 +454,7 @@ impl MarketFactory {
         // EFFECTS
         env.storage().persistent().set(&ADMIN, &new_admin);
         env.storage().persistent().remove(&PENDING_ADMIN);
+        env.storage().persistent().remove(&PENDING_ADMIN_EXPIRY);
 
         boxmeout_shared::emit_admin_transferred(&env, old_admin, new_admin);
         Ok(())
