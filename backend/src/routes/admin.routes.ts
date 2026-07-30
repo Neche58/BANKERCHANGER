@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { AppError } from '../utils/AppError';
 import { flagDispute, investigateDispute, cancelMarket, resolveDispute, listDisputes, processRefunds, bulkPause, bulkCancel } from '../api/controllers/AdminController';
 import {
@@ -10,10 +9,10 @@ import {
   buildTradesCsv,
 } from '../services/export.service';
 import { sendExportReadyEmail } from '../services/email.service';
+import { flushOracleWhitelistCache } from '../oracle/OracleService';
+import { requireAdmin } from '../middleware/requireAdminJwt.middleware';
 
 const router = Router();
-
-const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-jwt-secret-change-me';
 
 /**
  * @swagger
@@ -21,34 +20,6 @@ const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-jwt-secret-change-me';
  *   name: Admin
  *   description: Admin-only operations
  */
-
-// ---------------------------------------------------------------------------
-// Admin middleware — verifies JWT and checks admin role
-// ---------------------------------------------------------------------------
-async function requireAdmin(req: Request, _res: Response, next: NextFunction): Promise<void> {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      throw new AppError(401, 'Missing or invalid Authorization header');
-    }
-
-    const token = authHeader.slice(7);
-    const payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
-
-    if (payload.type !== 'access') {
-      throw new AppError(401, 'Invalid token type');
-    }
-
-    const userId = payload.sub as string;
-    const sessionVersion: number = payload.sv ?? 0;
-
-    (req as unknown as Record<string, unknown>).userId = userId;
-    (req as unknown as Record<string, unknown>).sessionVersion = sessionVersion;
-    next();
-  } catch (err) {
-    next(err instanceof AppError ? err : new AppError(401, 'Invalid or expired token'));
-  }
-}
 
 /**
  * @swagger
@@ -441,6 +412,37 @@ router.post('/export/request', requireAdmin, async (req: Request, res: Response,
         logger.error({ msg: 'Async export failed', err });
       }
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * @swagger
+ * /admin/oracle/refresh-whitelist:
+ *   post:
+ *     summary: Force-flush the oracle whitelist Redis cache (admin only)
+ *     description: >
+ *       Deletes the cached oracle whitelist from Redis so the next
+ *       verification call re-reads ORACLE_WHITELIST env var and repopulates
+ *       the cache. Use this immediately after removing a compromised oracle
+ *       from the env config so all instances propagate the change within
+ *       one TTL cycle.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Cache flushed successfully
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Redis error
+ */
+router.post('/oracle/refresh-whitelist', requireAdmin, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    await flushOracleWhitelistCache();
+    res.json({ message: 'Oracle whitelist cache flushed. New whitelist will be loaded on next verification.' });
   } catch (err) {
     next(err);
   }

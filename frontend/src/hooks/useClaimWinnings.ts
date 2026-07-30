@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — useClaimWinnings Hook
+// BANKERCHANGER — useClaimWinnings Hook
 // ============================================================
 
 import { useState, useCallback } from 'react';
@@ -12,6 +12,7 @@ export interface UseClaimWinningsResult {
   txStatus: TxStatus;
   txHash: string | null;
   error: string | null;
+  isSubmitting: boolean;
   reset: () => void;
 }
 
@@ -21,9 +22,13 @@ export function useClaimWinnings(): UseClaimWinningsResult {
   const [txStatus, setTxStatus] = useState<TxStatus>(IDLE);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { setTxStatus: setStoreTxStatus } = useAppStore();
 
   const claimWinnings = useCallback(async (marketId: string) => {
+    if (isSubmitting) return; // Prevent duplicate submissions
+    
+    setIsSubmitting(true);
     setError(null);
     setTxHash(null);
 
@@ -44,20 +49,23 @@ export function useClaimWinnings(): UseClaimWinningsResult {
 
       // Invalidate caches so useBets and useMarket refetch fresh data
       // Both hooks use useEffect with no external cache — trigger by dispatching a custom event
-      window.dispatchEvent(new CustomEvent('boxmeout:claim_success', { detail: { marketId } }));
+      window.dispatchEvent(new CustomEvent('bankerchanger:claim_success', { detail: { marketId } }));
     } catch (e: any) {
       const msg = e?.message ?? 'Claim failed';
       setError(msg);
       update({ hash: null, status: 'error', error: msg });
+    } finally {
+      setIsSubmitting(false);
     }
-  }, [setStoreTxStatus]);
+  }, [isSubmitting, setStoreTxStatus]);
 
   const reset = useCallback(() => {
     setTxStatus(IDLE);
     setStoreTxStatus(IDLE);
     setTxHash(null);
     setError(null);
+    setIsSubmitting(false);
   }, [setStoreTxStatus]);
 
-  return { claimWinnings, txStatus, txHash, error, reset };
+  return { claimWinnings, txStatus, txHash, error, isSubmitting, reset };
 }

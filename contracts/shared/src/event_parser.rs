@@ -1,5 +1,5 @@
 //! ============================================================
-//! BOXMEOUT — Event Parsing Utilities
+//! BANKERCHANGER — Event Parsing Utilities
 //! Parse raw Soroban event payloads into typed event structs.
 //! ============================================================
 

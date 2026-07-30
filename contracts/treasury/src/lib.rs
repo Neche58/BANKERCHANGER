@@ -1,6 +1,6 @@
 #![no_std]
 //! ============================================================
-//! BOXMEOUT — Treasury Contract (Security-Audited)
+//! BANKERCHANGER — Treasury Contract (Security-Audited)
 //! All fund-moving functions follow Checks-Effects-Interactions.
 //! require_auth() is always the first call.
 //! ============================================================
@@ -37,6 +37,21 @@ impl Treasury {
 
     fn day_bucket(env: &Env) -> u64 {
         env.ledger().timestamp() / 86400
+    }
+
+    /// Prune DAILY_WITHDRAWN to keep only the current bucket and the one before it.
+    /// Called on every withdrawal so the map never grows beyond 2 entries.
+    fn prune_daily_withdrawn(env: &Env, daily: &mut Map<u64, i128>, current_bucket: u64) {
+        // Collect keys older than current_bucket - 1 (keep current and previous)
+        let mut stale: Vec<u64> = Vec::new(env);
+        for (k, _) in daily.iter() {
+            if k + 1 < current_bucket {
+                stale.push_back(k);
+            }
+        }
+        for k in stale.iter() {
+            daily.remove(k);
+        }
     }
 
     fn add_to_accumulated_token(env: &Env, token: &Address, amount: i128) {

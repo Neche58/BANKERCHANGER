@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — useMarkets Hook
+// BANKERCHANGER — useMarkets Hook
 // Fetches and auto-refreshes the full market list.
 // Contributors: implement the hook body.
 // ============================================================

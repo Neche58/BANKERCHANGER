@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — useMarketOdds Hook
+// BANKERCHANGER — useMarketOdds Hook
 // Live odds hook backed by a Server-Sent Events stream.
 // Falls back to a one-shot fetch for terminal markets.
 // ============================================================

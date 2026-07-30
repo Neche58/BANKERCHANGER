@@ -4,6 +4,9 @@ import { validateEnv } from "./config/env";
 // Validate environment variables first before importing anything else that uses them!
 const env = validateEnv();
 
+import { version } from '../package.json';
+
+import { createCorsMiddleware } from "./config/cors";
 import { setupSwagger } from "./config/swagger";
 import { errorMiddleware } from "./middleware/error.middleware";
 import { initSentry, applySentryRequestHandler } from "./middleware/sentry.middleware";
@@ -27,6 +30,9 @@ import { register, httpRequestDuration, httpRequestsTotal } from "./services/met
 initSentry(env.SENTRY_DSN, env.NODE_ENV);
 
 const app = express();
+
+// CORS configuration - must be before other middleware
+app.use(createCorsMiddleware());
 
 // Middleware
 app.use(pinoHttp({ logger }));
@@ -65,6 +71,7 @@ app.get("/health", async (_req, res) => {
       status: "ok",
       db: "connected",
       redis: "connected",
+      version,
       dbPool: {
         totalCount: pool.totalCount,
         idleCount: pool.idleCount,

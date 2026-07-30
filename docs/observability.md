@@ -1,6 +1,6 @@
 # Observability Guide
 
-BoxMeOut exports Prometheus metrics, structured logs, and Sentry error tracking for production monitoring.
+BANKERCHANGER exports Prometheus metrics, structured logs, and Sentry error tracking for production monitoring.
 
 ## Prometheus Metrics
 
@@ -62,7 +62,7 @@ Default `prom-client` metrics are also collected, including:
 
 ```yaml
 scrape_configs:
-  - job_name: 'boxmeout'
+  - job_name: 'bankerchanger'
     scrape_interval: 15s
     static_configs:
       - targets: ['backend:3001']
@@ -71,7 +71,7 @@ scrape_configs:
 
 ## Structured Logging
 
-BoxMeOut uses [Pino](https://getpino.io/) for structured JSON logging.
+BANKERCHANGER uses [Pino](https://getpino.io/) for structured JSON logging.
 
 **Log levels:** `trace`, `debug`, `info`, `warn`, `error`, `fatal`
 

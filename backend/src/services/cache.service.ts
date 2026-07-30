@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Centralized Cache Service
+// BANKERCHANGER — Centralized Cache Service
 // Provides Redis cache operations with automatic invalidation.
 // Namespaced keys: market:{id}, leaderboard:global:*, user:{id}:balance
 // ============================================================

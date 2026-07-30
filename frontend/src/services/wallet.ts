@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Wallet Service
+// BANKERCHANGER — Wallet Service
 // Manages Freighter wallet connection and Stellar transactions.
 // ============================================================
 
@@ -14,6 +14,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 import type { BetSide, CreateProposalParams, VoteType } from '../types';
+import { xlmToStroops } from '../utils/xlmToStroops';
 
 const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? 'testnet';
 const HORIZON_URL =
@@ -26,7 +27,24 @@ const SOROBAN_RPC_URL =
 const NETWORK_PASSPHRASE =
   NETWORK === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
 
-const LS_KEY = 'boxmeout_wallet_address';
+const WALLET_STORAGE_KEY = 'bankerchanger_wallet_address';
+
+/**
+ * Storage Decision: sessionStorage vs localStorage
+ * 
+ * TRADE-OFF: Using sessionStorage instead of localStorage for wallet address.
+ * 
+ * sessionStorage benefits:
+ *  - Auto-clears when tab/browser closes (security on shared/public devices)
+ *  - Wallet connection cannot persist after logout or browser restart
+ *  - Prevents token theft if device is compromised between sessions
+ * 
+ * Downside:
+ *  - Users must reconnect wallet if they refresh the page or open a new tab
+ * 
+ * This choice prioritizes security on shared devices over convenience.
+ * For public/shared computers, indefinite persistence is a significant risk.
+ */
 
 // ─── Custom Errors ───────────────────────────────────────────────────────────
 
@@ -131,6 +149,53 @@ async function buildAndSubmit(
 
 // ─── Wallet connection ────────────────────────────────────────────────────────
 
+/** Returns which wallet extensions are installed in the current browser. */
+export function detectWallets(): { freighter: boolean; albedo: boolean } {
+  if (typeof window === 'undefined') return { freighter: false, albedo: false };
+  return {
+    freighter: !!(window as any).freighter,
+    albedo: !!(window as any).albedo,
+  };
+}
+
+export type WalletType = 'freighter' | 'albedo';
+
+/**
+ * Connect to a specific wallet extension by name.
+ * Used by the wallet selection modal so each button connects to the
+ * wallet the user explicitly chose (#360).
+ */
+export async function connectWalletByType(type: WalletType): Promise<string> {
+  if (typeof window === 'undefined') throw new Error('Browser only');
+
+  if (type === 'freighter') {
+    const freighter = (window as any).freighter;
+    if (!freighter) throw new WalletNotInstalledError('Freighter is not installed. Get it at https://freighter.app');
+    try {
+      await freighter.requestAccess();
+      const { publicKey } = await freighter.getPublicKey();
+      sessionStorage.setItem(WALLET_STORAGE_KEY, publicKey);
+      return publicKey;
+    } catch (err) {
+      throw new WalletConnectionError(err instanceof Error ? err.message : 'User rejected wallet connection');
+    }
+  }
+
+  if (type === 'albedo') {
+    const albedo = (window as any).albedo;
+    if (!albedo) throw new WalletNotInstalledError('Albedo is not installed. Get it at https://albedo.link');
+    try {
+      const { pubkey } = await albedo.publicKey({ token: 'boxmeout' });
+      sessionStorage.setItem(WALLET_STORAGE_KEY, pubkey);
+      return pubkey;
+    } catch (err) {
+      throw new WalletConnectionError(err instanceof Error ? err.message : 'User rejected wallet connection');
+    }
+  }
+
+  throw new WalletNotInstalledError();
+}
+
 export async function connectWallet(): Promise<string> {
   if (typeof window === 'undefined') throw new Error('Browser only');
   const freighter = (window as any).freighter;
@@ -139,7 +204,7 @@ export async function connectWallet(): Promise<string> {
     try {
       await freighter.requestAccess();
       const { publicKey } = await freighter.getPublicKey();
-      localStorage.setItem(LS_KEY, publicKey);
+      sessionStorage.setItem(WALLET_STORAGE_KEY, publicKey);
       return publicKey;
     } catch (err) {
       throw new WalletConnectionError(
@@ -149,8 +214,8 @@ export async function connectWallet(): Promise<string> {
   }
   if (albedo) {
     try {
-      const { pubkey } = await albedo.publicKey({ token: 'boxmeout' });
-      localStorage.setItem(LS_KEY, pubkey);
+      const { pubkey } = await albedo.publicKey({ token: 'bankerchanger' });
+      sessionStorage.setItem(WALLET_STORAGE_KEY, pubkey);
       return pubkey;
     } catch (err) {
       throw new WalletConnectionError(
@@ -164,12 +229,12 @@ export async function connectWallet(): Promise<string> {
 }
 
 export function disconnectWallet(): void {
-  localStorage.removeItem(LS_KEY);
+  sessionStorage.removeItem(WALLET_STORAGE_KEY);
 }
 
 export function getConnectedAddress(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem(LS_KEY);
+  return sessionStorage.getItem(WALLET_STORAGE_KEY);
 }
 
 // ─── Contract invocations ─────────────────────────────────────────────────────
@@ -399,15 +464,7 @@ export async function getWalletBalance(): Promise<number> {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-export function xlmToStroops(xlm: number): bigint {
-  const [whole, frac = ''] = xlm.toString().split('.');
-  const fracPadded = frac.slice(0, 7).padEnd(7, '0');
-  return BigInt(whole) * 10_000_000n + BigInt(fracPadded);
-}
-
-export function stroopsToXlm(stroops: bigint | string): number {
-  return Number(BigInt(stroops)) / 10_000_000;
-}
+export { xlmToStroops, stroopsToXlm } from '../utils/xlmToStroops';
 
 export function stellarExplorerUrl(
   type: 'tx' | 'account' | 'contract',

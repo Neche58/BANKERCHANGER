@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — MarketCard Component
+// BANKERCHANGER — MarketCard Component
 // Compact card for the home page market grid.
 // Contributors: implement the JSX body.
 // ============================================================
@@ -9,6 +9,7 @@ import type { Market } from '../../types';
 import { MarketOddsBar } from './MarketOddsBar';
 import { MarketStatusBadge } from './MarketStatusBadge';
 import { CountdownTimer } from '../ui/CountdownTimer';
+import { ScheduledTimeDisplay } from '../ui/ScheduledTimeDisplay';
 
 interface MarketCardProps {
   market: Market;
@@ -48,9 +49,12 @@ export function MarketCard({ market }: MarketCardProps): JSX.Element {
       />
 
       {/* Footer */}
-      <div className="flex items-center justify-between text-xs text-gray-400">
-        <CountdownTimer targetDate={market.scheduled_at} label="Starts in" />
-        <span>{totalXlm} XLM pooled</span>
+      <div className="flex items-center justify-between text-xs text-gray-400 gap-2">
+        <div className="flex flex-col gap-1">
+          <ScheduledTimeDisplay scheduledAt={market.scheduled_at} />
+          <CountdownTimer targetDate={market.scheduled_at} label="Starts in" />
+        </div>
+        <span className="text-right">{totalXlm} XLM pooled</span>
       </div>
     </Link>
   );
