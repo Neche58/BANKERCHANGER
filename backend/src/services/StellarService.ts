@@ -5,7 +5,23 @@
 // Contributors: implement every function marked TODO.
 // ============================================================
 
-import { Account, Horizon, Keypair, Networks, Operation, rpc, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
+import { Account, Address, Horizon, Keypair, Networks, Operation, rpc, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
+
+/**
+ * Thrown when a Soroban contract invocation cannot be completed —
+ * either a permanent failure (simulation/submit/on-chain FAILED) or
+ * a timeout after exhausting all fee-bump retries. `txHash` is set
+ * whenever a transaction was actually submitted to the network.
+ */
+export class StellarInvocationError extends Error {
+  txHash?: string;
+
+  constructor(message: string, txHash?: string) {
+    super(message);
+    this.name = 'StellarInvocationError';
+    this.txHash = txHash;
+  }
+}
 
 /**
  * Builds, simulates, signs, and submits a Soroban contract invocation.
@@ -30,7 +46,8 @@ export async function invokeContract(
   source_keypair?: Keypair,
 ): Promise<string> {
   const horizonUrl = process.env.HORIZON_URL ?? 'https://horizon-testnet.stellar.org';
-  const rpcUrl = process.env.STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org';
+  const rpcUrl = process.env.STELLAR_RPC_URL;
+  if (!rpcUrl) throw new Error('STELLAR_RPC_URL env var is required');
   const networkPassphrase = process.env.STELLAR_NETWORK === 'public'
     ? Networks.PUBLIC
     : Networks.TESTNET;
@@ -50,81 +67,75 @@ export async function invokeContract(
 
   const invokeContractHostFunction = xdr.HostFunction.hostFunctionTypeInvokeContract(
     new xdr.InvokeContractArgs({
-      contractAddress: xdr.ScAddress.contractFromAddress(contract_address),
-      functionName: xdr.ScSymbol.fromString(method),
+      contractAddress: new Address(contract_address).toScAddress(),
+      functionName: method,
       args,
     }),
   );
 
   const baseFee = 100; // Base fee in stroops
-  let attempts = 0;
   const maxRetries = 3;
 
-  while (attempts < maxRetries) {
-    try {
-      // Step 1-2: Build transaction
-      const transaction = new TransactionBuilder(sourceAccount, {
-        fee: (baseFee * (1 + attempts)).toString(),
-        networkPassphrase,
-      })
-        .addOperation(Operation.invokeHostFunction({ hostFunction: invokeContractHostFunction, auth: [] }))
-        .setTimeout(30)
-        .build();
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // Step 1-2: Build transaction (fee bumps by one baseFee increment per retry)
+    const transaction = new TransactionBuilder(sourceAccount, {
+      fee: (baseFee * (1 + attempt)).toString(),
+      networkPassphrase,
+    })
+      .addOperation(Operation.invokeHostFunction({ func: invokeContractHostFunction, auth: [] }))
+      .setTimeout(30)
+      .build();
 
-      // Step 3: Simulate to get resource fee
-      const simulation = await sorobanServer.simulateTransaction(transaction);
-      if ('error' in simulation && simulation.error) {
-        throw new Error(`Simulation error: ${JSON.stringify(simulation.error)}`);
-      }
-
-      const simResult = simulation as { results?: Array<{ minResourceFee?: string }> };
-      const minResourceFee = simResult.results?.[0]?.minResourceFee;
-      const resourceFee = minResourceFee ? parseInt(minResourceFee, 10) : 0;
-
-      // Step 4: Set total fee
-      const totalFee = (baseFee * (1 + attempts)) + resourceFee;
-      transaction.fee = totalFee.toString();
-
-      // Step 5: Sign
-      transaction.sign(source_keypair);
-
-      // Step 6: Submit
-      const submitResponse = await sorobanServer.sendTransaction(transaction);
-
-      if (submitResponse.status !== 'PENDING') {
-        throw new Error(`Submit failed: ${submitResponse.status}`);
-      }
-
-      const txHash = submitResponse.hash;
-
-      // Step 7: Poll for result (max 30s)
-      const startTime = Date.now();
-      const maxWait = 30_000;
-
-      while (Date.now() - startTime < maxWait) {
-        const statusResponse = await sorobanServer.getTransaction(txHash);
-
-        if (statusResponse.status === 'SUCCESS') {
-          return txHash;
-        } else if (statusResponse.status === 'FAILED') {
-          throw new Error(`Transaction failed: ${JSON.stringify(statusResponse.resultXdr)}`);
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-
-      // Step 8: Timeout — retry with bumped fee
-      throw new Error('Transaction polling timed out');
-
-    } catch (err) {
-      attempts++;
-      if (attempts >= maxRetries) {
-        throw err;
-      }
+    // Step 3: Simulate to get resource fee
+    const simulation = await sorobanServer.simulateTransaction(transaction);
+    if ('error' in simulation && simulation.error) {
+      throw new StellarInvocationError(`Simulation error: ${JSON.stringify(simulation.error)}`);
     }
+
+    const simResult = simulation as { minResourceFee?: string; results?: Array<{ minResourceFee?: string }> };
+    const minResourceFee = simResult.minResourceFee ?? simResult.results?.[0]?.minResourceFee;
+    const resourceFee = minResourceFee ? parseInt(minResourceFee, 10) : 0;
+
+    // Step 4: Set total fee
+    const totalFee = (baseFee * (1 + attempt)) + resourceFee;
+    transaction.fee = totalFee.toString();
+
+    // Step 5: Sign
+    transaction.sign(source_keypair);
+
+    // Step 6: Submit
+    const submitResponse = await sorobanServer.sendTransaction(transaction);
+
+    if (submitResponse.status !== 'PENDING') {
+      throw new StellarInvocationError(`Submit failed: ${submitResponse.status}`, submitResponse.hash);
+    }
+
+    const txHash = submitResponse.hash;
+
+    // Step 7: Poll for result (max 30s)
+    const startTime = Date.now();
+    const maxWait = 30_000;
+
+    while (Date.now() - startTime < maxWait) {
+      const statusResponse = await sorobanServer.getTransaction(txHash);
+
+      if (statusResponse.status === 'SUCCESS') {
+        return txHash;
+      } else if (statusResponse.status === 'FAILED') {
+        throw new StellarInvocationError(`Transaction failed: ${JSON.stringify(statusResponse.resultXdr)}`, txHash);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    // Step 8: Timeout — rebuild and resubmit with bumped fee (max 3 retries)
+    if (attempt >= maxRetries) {
+      throw new StellarInvocationError(`Transaction timed out after ${maxRetries} retries`, txHash);
+    }
+    console.log(`[StellarService] Transaction ${txHash} timed out, retrying with bumped fee (attempt ${attempt + 1}/${maxRetries})`);
   }
 
-  throw new Error('Max retries exceeded');
+  throw new StellarInvocationError('Max retries exceeded');
 }
 
 /**
@@ -156,8 +167,8 @@ export async function readContractState<T>(
 
   const invokeContractHostFunction = xdr.HostFunction.hostFunctionTypeInvokeContract(
     new xdr.InvokeContractArgs({
-      contractAddress: xdr.ScAddress.contractFromAddress(contract_address),
-      functionName: xdr.ScSymbol.fromString(method),
+      contractAddress: new Address(contract_address).toScAddress(),
+      functionName: method,
       args,
     }),
   );
@@ -166,7 +177,7 @@ export async function readContractState<T>(
     fee: '100',
     networkPassphrase,
   })
-    .addOperation(Operation.invokeHostFunction({ hostFunction: invokeContractHostFunction, auth: [] }))
+    .addOperation(Operation.invokeHostFunction({ func: invokeContractHostFunction, auth: [] }))
     .setTimeout(30)
     .build();
 

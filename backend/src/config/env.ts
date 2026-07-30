@@ -17,6 +17,13 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   JWT_SECRET: z.string().min(1).default('change-me-in-production'),
+  // Per-token-type secrets (recommended for production). Each falls back to
+  // JWT_SECRET when unset, so a single compromised secret only affects the
+  // token type it was actually used for once these are configured distinctly.
+  JWT_ACCESS_SECRET: z.string().min(1).optional(),
+  JWT_REFRESH_SECRET: z.string().min(1).optional(),
+  JWT_TEMP_SECRET: z.string().min(1).optional(),
+  JWT_RESET_SECRET: z.string().min(1).optional(),
   STELLAR_NETWORK: z.string().default('testnet'),
   HORIZON_URL: z.string().url().optional(),
   ORACLE_PUBLIC_KEY: z.string().optional(),

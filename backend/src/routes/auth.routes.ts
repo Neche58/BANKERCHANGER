@@ -10,7 +10,7 @@ import { getEnv } from '../config/env';
 const router = Router();
 
 const env = getEnv();
-const JWT_SECRET = env.JWT_SECRET;
+const JWT_ACCESS_SECRET = env.JWT_ACCESS_SECRET || env.JWT_SECRET;
 
 /**
  * @swagger
@@ -30,7 +30,7 @@ async function requireAuth(req: Request, _res: Response, next: NextFunction): Pr
     }
 
     const token = authHeader.slice(7);
-    const payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+    const payload = jwt.verify(token, JWT_ACCESS_SECRET) as jwt.JwtPayload;
 
     if (payload.type !== 'access') {
       throw new AppError(401, 'Invalid token type');
