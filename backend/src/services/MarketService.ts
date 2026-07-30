@@ -14,6 +14,33 @@ import { AppError } from '../utils/AppError';
 // ---------------------------------------------------------------------------
 // DB adapter — thin abstraction so tests can inject a mock
 // ---------------------------------------------------------------------------
+// Valid state transitions for market status.
+// Enforced in updateMarketStatus to prevent invalid transitions.
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  open:      ['locked', 'cancelled', 'disputed'],
+  locked:    ['resolved', 'cancelled', 'disputed'],
+  resolved:  ['disputed'],
+  disputed:  ['resolved'],
+  cancelled: [],
+};
+
+/**
+ * Validates a market status transition against the state machine.
+ * Throws AppError if the transition is not allowed.
+ */
+export function validateStatusTransition(currentStatus: string, newStatus: string): void {
+  const allowed = VALID_TRANSITIONS[currentStatus];
+  if (!allowed) {
+    throw new AppError(400, `Unknown market status: ${currentStatus}`);
+  }
+  if (!allowed.includes(newStatus)) {
+    throw new AppError(
+      400,
+      `Invalid status transition: ${currentStatus} → ${newStatus}. Allowed: ${allowed.join(', ') || 'none'}`,
+    );
+  }
+}
+
 export interface DbAdapter {
   findMarkets(filters?: MarketFilters): Promise<Market[]>;
   findMarketById(market_id: string): Promise<Market | null>;
@@ -34,6 +61,18 @@ function db(): DbAdapter {
 }
 
 export { db };
+
+/**
+ * Updates a market's status after validating the state transition.
+ * Reads the current status from the DB, validates, then applies the update.
+ */
+export async function updateMarketStatus(market_id: string, newStatus: string): Promise<void> {
+  const market = await db().findMarketById(market_id);
+  if (!market) throw AppError.notFound(`Market not found: ${market_id}`);
+  validateStatusTransition(market.status, newStatus);
+  await db().updateMarketStatus(market_id, newStatus);
+  await invalidateMarketCache(market_id);
+}
 
 export interface MarketFilters {
   status?: string;
@@ -719,6 +758,12 @@ export async function bulkPauseMarkets(marketIds: string[]): Promise<BulkResult>
 
   for (const id of marketIds) {
     try {
+      const market = await db().findMarketById(id);
+      if (!market) {
+        result.failed.push({ id, reason: 'Market not found' });
+        continue;
+      }
+      validateStatusTransition(market.status, 'locked');
       const { rows } = await pool.query(
         `UPDATE markets SET status = 'locked', updated_at = NOW()
          WHERE market_id = $1 AND status = 'open'

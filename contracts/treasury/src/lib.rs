@@ -255,6 +255,15 @@ impl Treasury {
         fees.set(token.clone(), balance - amount);
         env.storage().persistent().set(&ACCUMULATED_FEES, &fees);
         daily.set(bucket, today_total + amount);
+
+        // Prune DAILY_WITHDRAWN — keep only current and previous day bucket
+        let prune_before = bucket.saturating_sub(1);
+        let keys: Vec<u64> = daily.keys();
+        for k in keys.iter() {
+            if k < prune_before {
+                daily.remove(k);
+            }
+        }
         env.storage().persistent().set(&DAILY_WITHDRAWN, &daily);
 
         // INTERACTIONS
@@ -817,5 +826,54 @@ mod treasury_lifecycle_tests {
 
         assert_eq!(client.get_accumulated_fees(&token), limit - 10_000_000i128);
         assert_eq!(soroban_sdk::token::Client::new(&env, &token).balance(&dest), 10_000_000i128);
+    }
+
+    // ── DAILY_WITHDRAWN pruning ───────────────────────────────────────────────
+
+    /// After multiple day-boundary withdrawals the DAILY_WITHDRAWN map is pruned
+    /// to at most 2 entries (current + previous bucket).
+    #[test]
+    fn test_daily_withdrawn_pruning() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, Treasury);
+        let client = TreasuryClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let market = Address::generate(&env);
+        let limit = 10_000_000i128;
+        client.initialize(&admin, &limit);
+
+        let token = env.register_stellar_asset_contract(admin.clone());
+        StellarAssetClient::new(&env, &token).mint(&market, &1_000_000_000i128);
+        client.approve_market(&admin, &market);
+        client.deposit_fees(&market, &token, &1_000_000_000i128);
+
+        let dest = Address::generate(&env);
+        let day_secs = 86_400u64;
+
+        // Day 1 — first withdrawal
+        env.ledger().set_timestamp(day_secs);
+        client.withdraw_fees(&admin, &token, &limit, &dest);
+        assert_eq!(client.get_daily_withdrawal_amount(), limit);
+
+        // Day 2 — map should have 2 entries
+        env.ledger().set_timestamp(day_secs * 2);
+        client.withdraw_fees(&admin, &token, &limit, &dest);
+
+        // Day 3 — map should still have ≤2 entries (day 1 pruned)
+        env.ledger().set_timestamp(day_secs * 3);
+        client.withdraw_fees(&admin, &token, &limit, &dest);
+
+        // Verify map has at most 2 entries by reading storage directly
+        let key = "DAILY_WITHDRAWN";
+        let daily_len = env.as_contract(&id, || {
+            let daily: Map<u64, i128> = env
+                .storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or_else(|| Map::new(&env));
+            daily.keys().len()
+        });
+        assert!(daily_len <= 2, "DAILY_WITHDRAWN map length should be ≤ 2, got {daily_len}");
     }
 }

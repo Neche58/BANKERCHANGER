@@ -300,6 +300,7 @@ impl Market {
         // EFFECTS
         state.status = MarketStatus::Locked;
         Self::save_state(&env, &state);
+        Self::extend_market_ttl(&env);
 
         boxmeout_shared::emit_market_locked(&env, state.market_id);
         Ok(())
@@ -398,6 +399,7 @@ impl Market {
             state.resolved_at = env.ledger().timestamp();
             state.oracle_used = OptionalOracleRole::Some(OracleRole::Primary);
             Self::save_state(&env, &state);
+            Self::extend_market_ttl(&env);
             
             // Clear pending reports
             env.storage().persistent().set(&PENDING_REPORTS, &Map::<Address, OracleReport>::new(&env));
@@ -515,6 +517,7 @@ impl Market {
             updated_bets.push_back(bet);
         }
         Self::save_bets(&env, &bettor, &updated_bets);
+        Self::extend_market_ttl(&env);
 
         let receipt = ClaimReceipt {
             bettor: bettor.clone(),
@@ -606,6 +609,7 @@ impl Market {
             updated_bets.push_back(bet);
         }
         Self::save_bets(&env, &bettor, &updated_bets);
+        Self::extend_market_ttl(&env);
 
         // ── INTERACTIONS ──────────────────────────────────────────────────────
         let token_client = token::Client::new(&env, &token);
@@ -654,6 +658,7 @@ impl Market {
 
         state.status = MarketStatus::Cancelled;
         Self::save_state(&env, &state);
+        Self::extend_market_ttl(&env);
 
         boxmeout_shared::emit_market_cancelled(&env, state.market_id, reason);
         Ok(())
@@ -691,6 +696,7 @@ impl Market {
 
         state.status = MarketStatus::Disputed;
         Self::save_state(&env, &state);
+        Self::extend_market_ttl(&env);
 
         boxmeout_shared::emit_market_disputed(&env, state.market_id, reason);
         Ok(())
