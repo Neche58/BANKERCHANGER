@@ -198,8 +198,11 @@ export async function connectWalletByType(type: WalletType): Promise<string> {
 
 export async function connectWallet(): Promise<string> {
   if (typeof window === 'undefined') throw new Error('Browser only');
+  
   const freighter = (window as any).freighter;
   const albedo = (window as any).albedo;
+  
+  // Try Freighter first if available
   if (freighter) {
     try {
       await freighter.requestAccess();
@@ -212,6 +215,8 @@ export async function connectWallet(): Promise<string> {
       );
     }
   }
+  
+  // Try Albedo if Freighter is not available or connection failed
   if (albedo) {
     try {
       const { pubkey } = await albedo.publicKey({ token: 'bankerchanger' });
@@ -223,8 +228,10 @@ export async function connectWallet(): Promise<string> {
       );
     }
   }
+  
+  // Neither wallet is installed - throw with helpful message
   throw new WalletNotInstalledError(
-    'No wallet extension found. Install Freighter at https://freighter.app',
+    'No wallet extension found. Install Freighter at https://freighter.app or Albedo at https://albedo.link',
   );
 }
 
