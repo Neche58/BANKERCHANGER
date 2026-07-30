@@ -62,9 +62,9 @@ export interface Portfolio {
   active_bets: Bet[];
   past_bets: Bet[];
   pending_claims: Bet[];
-  total_staked_xlm: number;
-  total_won_xlm: number;
-  total_lost_xlm: number;
+  total_staked_xlm: number | null;
+  total_won_xlm: number | null;
+  total_lost_xlm: number | null;
 }
 
 export interface MarketStats {
