@@ -76,4 +76,9 @@ export const cronDistributionsArchived = new Counter({
   help: 'Total failed distributions rows archived by cleanup cron',
 });
 
+export const cronBlockchainEventsDeleted = new Counter({
+  name: 'cron_blockchain_events_deleted_total',
+  help: 'Total processed blockchain_events rows deleted by cleanup cron',
+});
+
 export { register };
