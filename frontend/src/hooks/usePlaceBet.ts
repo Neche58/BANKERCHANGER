@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — usePlaceBet Hook
+// BANKERCHANGER — usePlaceBet Hook
 // Mutation hook for signing and broadcasting place_bet transactions
 // ============================================================
 

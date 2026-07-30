@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Market Service
+// BANKERCHANGER — Market Service
 // Business logic layer between controllers and the DB/chain.
 // Contributors: implement every function marked TODO.
 // ============================================================
@@ -41,6 +41,7 @@ export interface MarketFilters {
   fighter?: string;
   dateFrom?: Date;
   dateTo?: Date;
+  sort?: 'date_asc' | 'date_desc' | 'pool_desc';
 }
 
 export interface Pagination {
@@ -122,9 +123,10 @@ export async function getMarkets(
   const fighterKey = filters?.fighter ?? '';
   const dateFromKey = filters?.dateFrom?.toISOString() ?? '';
   const dateToKey = filters?.dateTo?.toISOString() ?? '';
+  const sortKey = filters?.sort ?? 'date_desc';
   const page = pagination?.page ?? 1;
   const limit = pagination?.limit ?? 50;
-  const cacheKey = `markets:${statusKey}:${weightKey}:${fighterKey}:${dateFromKey}:${dateToKey}:${page}:${limit}`;
+  const cacheKey = `markets:${statusKey}:${weightKey}:${fighterKey}:${dateFromKey}:${dateToKey}:${sortKey}:${page}:${limit}`;
   const cached = await cache.get<MarketListResult>(cacheKey);
   if (cached) return cached;
 
@@ -146,9 +148,14 @@ export async function getMarkets(
       return true;
     });
 
-    const sorted = [...filtered].sort(
-      (a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime(),
-    );
+    let sorted: Market[];
+    if (filters?.sort === 'date_asc') {
+      sorted = [...filtered].sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+    } else if (filters?.sort === 'pool_desc') {
+      sorted = [...filtered].sort((a, b) => Number(b.total_pool) - Number(a.total_pool));
+    } else {
+      sorted = [...filtered].sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
+    }
 
     const offset = (page - 1) * limit;
     const paged = sorted.slice(offset, offset + limit);
@@ -179,10 +186,14 @@ export async function getMarkets(
     }
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const orderBySql = 
+      filters?.sort === 'date_asc' ? 'ORDER BY scheduled_at ASC' :
+      filters?.sort === 'pool_desc' ? 'ORDER BY total_pool DESC' :
+      'ORDER BY scheduled_at DESC';
     const offset = (page - 1) * limit;
 
     const rows = await pool.query(
-      `SELECT * FROM markets ${whereSql} ORDER BY scheduled_at DESC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+      `SELECT * FROM markets ${whereSql} ${orderBySql} LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
       [...values, limit, offset],
     );
 
@@ -245,7 +256,9 @@ export async function getMarketById(market_id: string): Promise<MarketWithOdds> 
 /**
  * Returns live odds for a market.
  *
- * Formula: odds_x = floor(pool_x * 10_000 / total_pool)
+ * Formula: odds_x = floor((total_pool - fee) * 10_000 / pool_side)
+ * Uses the net pool (total minus platform fee) to compute the actual payout
+ * multiplier each outcome would return per unit staked.
  * Falls back to querying the Market contract via StellarService.readContractState()
  * if DB pool sizes are stale (updated_at older than 30 seconds).
  */
@@ -275,10 +288,13 @@ export async function getMarketOdds(market_id: string): Promise<MarketOdds> {
 
   if (total_pool === 0n) return { odds_a: 0, odds_b: 0, odds_draw: 0 };
 
+  const fee = (total_pool * BigInt(market.fee_bps)) / 10000n;
+  const net_pool = total_pool - fee;
+
   return {
-    odds_a: Number(pool_a * 10000n / total_pool),
-    odds_b: Number(pool_b * 10000n / total_pool),
-    odds_draw: Number(pool_draw * 10000n / total_pool),
+    odds_a: pool_a === 0n ? 0 : Number(net_pool * 10000n / pool_a),
+    odds_b: pool_b === 0n ? 0 : Number(net_pool * 10000n / pool_b),
+    odds_draw: pool_draw === 0n ? 0 : Number(net_pool * 10000n / pool_draw),
   };
 }
 

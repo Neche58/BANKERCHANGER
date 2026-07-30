@@ -1,6 +1,6 @@
 #![no_std]
 //! ============================================================
-//! BOXMEOUT — MarketFactory Contract (Security-Audited)
+//! BANKERCHANGER — MarketFactory Contract (Security-Audited)
 //! ============================================================
 
 use soroban_sdk::{contract, contractimpl, contractclient, Address, Env, Vec, Map, BytesN};
@@ -13,6 +13,7 @@ use boxmeout_shared::{
 const MARKET_COUNT: &str    = "MARKET_COUNT";
 const MARKET_MAP: &str      = "MARKET_MAP";
 const ADMIN: &str           = "ADMIN";
+const PENDING_ADMIN: &str   = "PENDING_ADMIN";
 const ORACLE_WHITELIST: &str = "ORACLE_WHITELIST";
 const PAUSED: &str          = "PAUSED";
 const DEFAULT_CONFIG: &str  = "DEFAULT_CONFIG";
@@ -32,6 +33,7 @@ pub trait MarketInterface {
     ) -> Result<(), ContractError>;
     fn get_bets_by_address(env: Env, bettor: Address) -> Vec<BetRecord>;
     fn get_state(env: Env) -> Result<MarketState, ContractError>;
+    fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), ContractError>;
 }
 
 #[contract]
@@ -69,6 +71,7 @@ impl MarketFactory {
         admin: Address,
         treasury: Address,
         oracle: Address,
+        oracle_raw_key: BytesN<32>,
         config: FactoryConfig,
     ) -> Result<(), ContractError> {
         // CHECKS
@@ -79,8 +82,8 @@ impl MarketFactory {
         env.storage().persistent().set(&ADMIN, &admin);
         env.storage().persistent().set(&TREASURY, &treasury);
 
-        let mut oracles: Vec<Address> = Vec::new(&env);
-        oracles.push_back(oracle);
+        let mut oracles: Map<Address, BytesN<32>> = Map::new(&env);
+        oracles.set(oracle, oracle_raw_key);
         env.storage().persistent().set(&ORACLE_WHITELIST, &oracles);
 
         env.storage().persistent().set(&PAUSED, &false);
@@ -88,7 +91,7 @@ impl MarketFactory {
         env.storage().persistent().set(&MARKET_MAP, &Map::<u64, Address>::new(&env));
 
         let default_config = MarketConfig {
-            min_bet: config.default_min_bet,
+            min_bet_amount: config.default_min_bet,
             max_bet: config.default_max_bet,
             fee_bps: config.default_fee_bps,
             lock_before_secs: config.default_lock_before_secs,
@@ -147,10 +150,10 @@ impl MarketFactory {
         }
 
         // ── Config validation ─────────────────────────────
-        if config.min_bet == 0 {
-            return Err(ContractError::BetTooLow);
+        if config.min_bet_amount == 0 {
+            return Err(ContractError::BelowMinimum);
         }
-        if config.max_bet < config.min_bet {
+        if config.max_bet < config.min_bet_amount {
             return Err(ContractError::InvalidMarketParameters);
         }
 
@@ -302,8 +305,8 @@ impl MarketFactory {
         caller.require_auth();
 
         let admin: Address = env.storage().persistent().get(&ADMIN).ok_or(ContractError::NotAdmin)?;
-        let oracles: Vec<Address> = env.storage().persistent().get(&ORACLE_WHITELIST).unwrap_or_else(|| Vec::new(&env));
-        if caller != admin && !oracles.contains(caller.clone()) {
+        let oracles: Map<Address, BytesN<32>> = env.storage().persistent().get(&ORACLE_WHITELIST).unwrap_or_else(|| Map::new(&env));
+        if caller != admin && !oracles.contains_key(caller.clone()) {
             return Err(ContractError::NotAdmin);
         }
 
@@ -330,19 +333,21 @@ impl MarketFactory {
         Ok(())
     }
 
-    /// Adds an oracle to the whitelist.
+    /// Adds an oracle to the whitelist with its raw Ed25519 public key.
+    ///
+    /// # Arguments
+    /// - `oracle`: Stellar address of the oracle (G... address)
+    /// - `raw_key`: Raw 32-byte Ed25519 public key corresponding to `oracle`
     ///
     /// # Errors
     /// - `Unauthorized`: Caller is not the admin
-    pub fn add_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), ContractError> {
+    pub fn add_oracle(env: Env, admin: Address, oracle: Address, raw_key: BytesN<32>) -> Result<(), ContractError> {
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
 
-        let mut oracles: Vec<Address> =
-            env.storage().persistent().get(&ORACLE_WHITELIST).unwrap_or_else(|| Vec::new(&env));
-        if !oracles.contains(oracle.clone()) {
-            oracles.push_back(oracle);
-        }
+        let mut oracles: Map<Address, BytesN<32>> =
+            env.storage().persistent().get(&ORACLE_WHITELIST).unwrap_or_else(|| Map::new(&env));
+        oracles.set(oracle, raw_key);
         env.storage().persistent().set(&ORACLE_WHITELIST, &oracles);
         Ok(())
     }
@@ -356,34 +361,43 @@ impl MarketFactory {
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
 
-        let oracles: Vec<Address> =
-            env.storage().persistent().get(&ORACLE_WHITELIST).unwrap_or_else(|| Vec::new(&env));
-        let mut updated: Vec<Address> = Vec::new(&env);
-        let mut found = false;
-        for o in oracles.iter() {
-            if o == oracle {
-                found = true;
-            } else {
-                updated.push_back(o);
-            }
-        }
-        if !found {
+        let mut oracles: Map<Address, BytesN<32>> =
+            env.storage().persistent().get(&ORACLE_WHITELIST).unwrap_or_else(|| Map::new(&env));
+        if !oracles.contains_key(oracle.clone()) {
             return Err(ContractError::OracleNotWhitelisted);
         }
-        env.storage().persistent().set(&ORACLE_WHITELIST, &updated);
+        oracles.remove(oracle);
+        env.storage().persistent().set(&ORACLE_WHITELIST, &oracles);
         Ok(())
     }
 
-    /// Returns the list of whitelisted oracles.
+    /// Returns the list of whitelisted oracle addresses.
     pub fn get_oracles(env: Env) -> Vec<Address> {
-        env.storage().persistent().get(&ORACLE_WHITELIST).unwrap_or_else(|| Vec::new(&env))
+        let oracles: Map<Address, BytesN<32>> =
+            env.storage().persistent().get(&ORACLE_WHITELIST).unwrap_or_else(|| Map::new(&env));
+        let mut result: Vec<Address> = Vec::new(&env);
+        for (addr, _) in oracles.iter() {
+            result.push_back(addr);
+        }
+        result
     }
 
-    /// Transfers admin privileges to a new address.
+    /// Returns the raw Ed25519 public key for a whitelisted oracle, or None if not found.
+    pub fn get_oracle_key(env: Env, oracle: Address) -> Option<BytesN<32>> {
+        let oracles: Map<Address, BytesN<32>> =
+            env.storage().persistent().get(&ORACLE_WHITELIST).unwrap_or_else(|| Map::new(&env));
+        oracles.get(oracle)
+    }
+
+    /// Proposes a new admin address, starting the two-step transfer.
+    ///
+    /// The current admin writes the candidate to `PENDING_ADMIN`.  Nothing
+    /// changes until the candidate calls `accept_admin`.  Calling this again
+    /// before acceptance overwrites the previous proposal (re-propose).
     ///
     /// # Errors
     /// - `NotAdmin`: Caller is not the current admin
-    pub fn transfer_admin(
+    pub fn propose_admin(
         env: Env,
         current_admin: Address,
         new_admin: Address,
@@ -391,11 +405,39 @@ impl MarketFactory {
         current_admin.require_auth();
         Self::require_admin(&env, &current_admin)?;
 
+        env.storage().persistent().set(&PENDING_ADMIN, &new_admin);
+        boxmeout_shared::emit_admin_proposed(&env, current_admin, new_admin);
+        Ok(())
+    }
+
+    /// Completes the two-step admin transfer.
+    ///
+    /// Must be called by the exact address stored in `PENDING_ADMIN`.
+    /// Clears `PENDING_ADMIN` and promotes the caller to `ADMIN`.
+    ///
+    /// # Errors
+    /// - `NotAdmin`: No pending proposal exists, or caller is not the pending admin
+    pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), ContractError> {
+        new_admin.require_auth();
+
+        let pending: Address = env
+            .storage().persistent()
+            .get(&PENDING_ADMIN)
+            .ok_or(ContractError::NotAdmin)?;
+
+        if new_admin != pending {
+            return Err(ContractError::NotAdmin);
+        }
+
         let old_admin: Address = env
             .storage().persistent()
             .get(&ADMIN)
             .ok_or(ContractError::NotAdmin)?;
+
+        // EFFECTS
         env.storage().persistent().set(&ADMIN, &new_admin);
+        env.storage().persistent().remove(&PENDING_ADMIN);
+
         boxmeout_shared::emit_admin_transferred(&env, old_admin, new_admin);
         Ok(())
     }
@@ -480,6 +522,41 @@ impl MarketFactory {
         }
         Ok(positions)
     }
+
+    /// Upgrades all existing market contracts to a new WASM implementation.
+    /// This function iterates through all open markets and calls their upgrade function.
+    ///
+    /// # Errors
+    /// - `NotAdmin`: Caller is not the admin
+    /// - `MarketNotFound`: A market ID in OPEN_MARKETS doesn't exist in MARKET_MAP
+    ///
+    /// # Security
+    /// - Only the factory admin can call this function
+    /// - State is preserved in each market contract across the upgrade
+    pub fn upgrade_all_markets(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
+
+        let market_ids: Vec<u64> = env.storage().persistent()
+            .get(&OPEN_MARKETS)
+            .unwrap_or_else(|| Vec::new(&env));
+        let market_map: Map<u64, Address> = env.storage().persistent()
+            .get(&MARKET_MAP)
+            .unwrap_or_else(|| Map::new(&env));
+
+        for market_id in market_ids.iter() {
+            let market_address = market_map.get(market_id)
+                .ok_or(ContractError::MarketNotFound)?;
+            let market_client = MarketClient::new(&env, &market_address);
+            market_client.upgrade(&admin, &new_wasm_hash)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -520,7 +597,7 @@ mod tests {
 
     fn sample_market_config(_env: &Env) -> MarketConfig {
         MarketConfig {
-            min_bet: 1_000_000,
+            min_bet_amount: 1_000_000,
             max_bet: 100_000_000_000,
             fee_bps: 200,
             lock_before_secs: 3600,
@@ -532,7 +609,8 @@ mod tests {
         let admin = Address::generate(env);
         let treasury = Address::generate(env);
         let oracle = Address::generate(env);
-        client.initialize(&admin, &treasury, &oracle, &default_config());
+        let oracle_raw_key: BytesN<32> = BytesN::from_array(env, &[1u8; 32]);
+        client.initialize(&admin, &treasury, &oracle, &oracle_raw_key, &default_config());
     }
 
     // ── initialize tests ────────────────────────────────────
@@ -544,11 +622,12 @@ mod tests {
         let admin = Address::generate(&env);
         let treasury = Address::generate(&env);
         let oracle = Address::generate(&env);
+        let oracle_raw_key: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
         let config = default_config();
         let mut expected_oracles: Vec<Address> = Vec::new(&env);
         expected_oracles.push_back(oracle.clone());
 
-        client.initialize(&admin, &treasury, &oracle, &config);
+        client.initialize(&admin, &treasury, &oracle, &oracle_raw_key, &config);
 
         assert!(!client.is_paused());
         assert_eq!(client.get_oracles(), expected_oracles);
@@ -561,11 +640,12 @@ mod tests {
         let admin = Address::generate(&env);
         let treasury = Address::generate(&env);
         let oracle = Address::generate(&env);
+        let oracle_raw_key: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
         let config = default_config();
 
-        client.initialize(&admin, &treasury, &oracle, &config);
+        client.initialize(&admin, &treasury, &oracle, &oracle_raw_key, &config);
 
-        let result = client.try_initialize(&admin, &treasury, &oracle, &config);
+        let result = client.try_initialize(&admin, &treasury, &oracle, &oracle_raw_key, &config);
         assert!(result.is_err());
     }
 
@@ -577,7 +657,8 @@ mod tests {
         let admin = Address::generate(&env);
         let treasury = Address::generate(&env);
         let oracle = Address::generate(&env);
-        client.initialize(&admin, &treasury, &oracle, &default_config());
+        let oracle_raw_key: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+        client.initialize(&admin, &treasury, &oracle, &oracle_raw_key, &default_config());
         client.pause_factory(&admin);
 
         let caller = Address::generate(&env);
@@ -621,7 +702,7 @@ mod tests {
         init_factory(&env, &client);
 
         let mut config = sample_market_config(&env);
-        config.min_bet = 0;
+        config.min_bet_amount = 0;
         let caller = Address::generate(&env);
         let result = client.try_create_market(
             &caller, &sample_fight(&env), &config, &None,
@@ -635,7 +716,7 @@ mod tests {
         init_factory(&env, &client);
 
         let mut config = sample_market_config(&env);
-        config.max_bet = config.min_bet - 1;
+        config.max_bet = config.min_bet_amount - 1;
         let caller = Address::generate(&env);
         let result = client.try_create_market(
             &caller, &sample_fight(&env), &config, &None,
@@ -703,5 +784,125 @@ mod tests {
 
         let ids = client.list_market_ids(&999u64, &10u32);
         assert_eq!(ids.len(), 0);
+    }
+}
+
+// ============================================================
+// ISSUE #26: Two-step admin transfer tests
+// ============================================================
+#[cfg(test)]
+mod admin_transfer_tests {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use boxmeout_shared::types::FactoryConfig;
+    use crate::{MarketFactory, MarketFactoryClient};
+
+    fn setup() -> (Env, MarketFactoryClient<'static>, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MarketFactory);
+        let client = MarketFactoryClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        let oracle = Address::generate(&env);
+        client.initialize(&admin, &treasury, &oracle, &FactoryConfig {
+            default_min_bet: 1_000_000,
+            default_max_bet: 100_000_000_000,
+            default_fee_bps: 200,
+            default_lock_before_secs: 3_600,
+            default_resolution_window: 86_400,
+        });
+        (env, client, admin)
+    }
+
+    /// Happy path: propose → accept promotes the new admin and clears PENDING_ADMIN.
+    #[test]
+    fn test_propose_then_accept_transfers_admin() {
+        let (env, client, admin) = setup();
+        let new_admin = Address::generate(&env);
+
+        // Step 1: current admin proposes
+        client.propose_admin(&admin, &new_admin);
+
+        // Step 2: nominee accepts
+        client.accept_admin(&new_admin);
+
+        // New admin can now call an admin-only function; old admin cannot
+        let non_admin = Address::generate(&env);
+        let result_old = client.try_pause_factory(&admin);
+        let result_new = client.try_pause_factory(&new_admin);
+        // old admin is rejected, new admin succeeds
+        assert!(result_old.is_err(), "Old admin must be rejected after transfer");
+        assert!(result_new.is_ok(), "New admin must be accepted after transfer");
+    }
+
+    /// Wrong caller: a third party cannot accept a pending proposal.
+    #[test]
+    fn test_wrong_caller_cannot_accept_admin() {
+        let (env, client, admin) = setup();
+        let new_admin = Address::generate(&env);
+        let impostor = Address::generate(&env);
+
+        client.propose_admin(&admin, &new_admin);
+
+        let result = client.try_accept_admin(&impostor);
+        assert!(result.is_err(), "Impostor must not be able to accept pending proposal");
+    }
+
+    /// Accept with no pending proposal returns NotAdmin.
+    #[test]
+    fn test_accept_with_no_pending_proposal_fails() {
+        let (env, client, _admin) = setup();
+        let anyone = Address::generate(&env);
+
+        let result = client.try_accept_admin(&anyone);
+        assert!(result.is_err(), "accept_admin with no pending proposal must fail");
+    }
+
+    /// Non-admin cannot propose.
+    #[test]
+    fn test_non_admin_cannot_propose() {
+        let (env, client, _admin) = setup();
+        let non_admin = Address::generate(&env);
+        let target = Address::generate(&env);
+
+        let result = client.try_propose_admin(&non_admin, &target);
+        assert!(result.is_err(), "Non-admin must not be able to propose a new admin");
+    }
+
+    /// Re-propose: calling propose_admin again overwrites the previous pending admin.
+    #[test]
+    fn test_re_propose_overwrites_previous_pending_admin() {
+        let (env, client, admin) = setup();
+        let first_nominee = Address::generate(&env);
+        let second_nominee = Address::generate(&env);
+
+        // First proposal
+        client.propose_admin(&admin, &first_nominee);
+
+        // Re-propose with a different address before first nominee accepts
+        client.propose_admin(&admin, &second_nominee);
+
+        // First nominee can no longer accept — the slot was overwritten
+        let result_first = client.try_accept_admin(&first_nominee);
+        assert!(result_first.is_err(), "Overwritten nominee must not be able to accept");
+
+        // Second nominee can accept
+        let result_second = client.try_accept_admin(&second_nominee);
+        assert!(result_second.is_ok(), "Current nominee must be able to accept after re-propose");
+    }
+
+    /// After a completed transfer, PENDING_ADMIN is cleared —
+    /// the old nominee cannot accept again (no double-accept).
+    #[test]
+    fn test_pending_admin_cleared_after_accept() {
+        let (env, client, admin) = setup();
+        let new_admin = Address::generate(&env);
+
+        client.propose_admin(&admin, &new_admin);
+        client.accept_admin(&new_admin);
+
+        // A second accept call must fail because PENDING_ADMIN was cleared
+        let result = client.try_accept_admin(&new_admin);
+        assert!(result.is_err(), "Second accept must fail after PENDING_ADMIN is cleared");
     }
 }

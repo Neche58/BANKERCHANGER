@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — Oracle Service
+// BANKERCHANGER — Oracle Service
 // Responsible for fetching fight results from external sources
 // and submitting them to Market contracts on Stellar.
 // ============================================================
@@ -9,11 +9,79 @@ import { Address, Keypair, xdr } from '@stellar/stellar-sdk';
 import { pool } from '../config/db';
 import { invokeContract } from '../services/StellarService';
 import { logger } from '../utils/logger';
-import { cacheGet, cacheSet } from '../services/cache.service';
+import { cacheGet, cacheSet, redis } from '../services/cache.service';
+import { incrWithExpire } from '../services/redis-lua';
 import type { OracleReport } from '../models/OracleReport';
 import type { Market } from '../models/Market';
+import { boxingApiResponseSchema } from '../schemas/validation.schemas';
 
 export type FightOutcome = 'fighter_a' | 'fighter_b' | 'draw' | 'no_contest';
+
+const FAILURE_THRESHOLD = 3;
+const FAILURE_KEY_PREFIX = 'oracle:failure:';
+const ALERT_SENT_KEY_PREFIX = 'oracle:alert_sent:';
+
+async function trackFailure(market_id: string): Promise<boolean> {
+  const failureKey = `${FAILURE_KEY_PREFIX}${market_id}`;
+  const alertSentKey = `${ALERT_SENT_KEY_PREFIX}${market_id}`;
+
+  try {
+    // Use atomic Lua script to prevent race condition between INCR and EXPIRE
+    const failures = await incrWithExpire(redis, failureKey, 7 * 24 * 60 * 60);
+
+    const alertSent = await redis.get(alertSentKey);
+    if (failures >= FAILURE_THRESHOLD && !alertSent) {
+      return true;
+    }
+    return false;
+  } catch (err) {
+    logger.error({ err, market_id }, 'trackFailure: Redis error');
+    return false;
+  }
+}
+
+async function clearFailureTracking(market_id: string): Promise<void> {
+  const failureKey = `${FAILURE_KEY_PREFIX}${market_id}`;
+  const alertSentKey = `${ALERT_SENT_KEY_PREFIX}${market_id}`;
+
+  try {
+    await redis.del(failureKey);
+    await redis.del(alertSentKey);
+  } catch (err) {
+    logger.error({ err, market_id }, 'clearFailureTracking: Redis error');
+  }
+}
+
+async function sendAlert(market_id: string, match_id: string): Promise<void> {
+  const webhookUrl = process.env.ALERT_WEBHOOK_URL;
+  if (!webhookUrl) {
+    logger.warn('sendAlert: ALERT_WEBHOOK_URL not configured');
+    return;
+  }
+
+  const alertSentKey = `${ALERT_SENT_KEY_PREFIX}${market_id}`;
+
+  try {
+    const payload = {
+      title: 'Oracle Resolution Failure Alert',
+      message: `Market ${market_id} (match ${match_id}) has failed to resolve ${FAILURE_THRESHOLD} times consecutively. User funds may be locked.`,
+      market_id,
+      match_id,
+      timestamp: new Date().toISOString(),
+    };
+
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    await redis.set(alertSentKey, '1', 'EX', 7 * 24 * 60 * 60);
+    logger.info({ market_id, match_id }, 'sendAlert: Alert sent successfully');
+  } catch (err) {
+    logger.error({ err, market_id, match_id }, 'sendAlert: Failed to send alert');
+  }
+}
 
 // Shape of a single fight entry returned by the external boxing API
 interface BoxingApiFight {
@@ -34,21 +102,48 @@ const OUTCOME_INDEX: Record<FightOutcome, number> = {
 };
 
 // ─── Whitelist cache ──────────────────────────────────────────────────────────
+// Stored in Redis so all instances share one cache and TTL.
+// Key: oracle:whitelist  Value: JSON array of address strings  TTL: 5 minutes
 
-let whitelistCache: Set<string> | null = null;
-let whitelistFetchedAt = 0;
-const WHITELIST_TTL_MS = 5 * 60 * 1000;
+const WHITELIST_REDIS_KEY = 'oracle:whitelist';
+const WHITELIST_TTL_SECS = 5 * 60;
 
 async function getOracleWhitelist(): Promise<Set<string>> {
-  if (whitelistCache && Date.now() - whitelistFetchedAt < WHITELIST_TTL_MS) {
-    return whitelistCache;
+  try {
+    const cached = await redis.get(WHITELIST_REDIS_KEY);
+    if (cached) {
+      const addresses = JSON.parse(cached) as string[];
+      return new Set(addresses);
+    }
+  } catch (err) {
+    logger.warn({ err }, 'getOracleWhitelist: Redis read error, falling back to env');
   }
+
   const addresses: string[] = process.env.ORACLE_WHITELIST
     ? process.env.ORACLE_WHITELIST.split(',').map((s) => s.trim())
     : [];
-  whitelistCache = new Set(addresses);
-  whitelistFetchedAt = Date.now();
-  return whitelistCache;
+
+  try {
+    await redis.set(WHITELIST_REDIS_KEY, JSON.stringify(addresses), 'EX', WHITELIST_TTL_SECS);
+  } catch (err) {
+    logger.warn({ err }, 'getOracleWhitelist: Redis write error, cache not populated');
+  }
+
+  return new Set(addresses);
+}
+
+/**
+ * Force-flush the oracle whitelist cache from Redis.
+ * The next call to getOracleWhitelist() will re-read from ORACLE_WHITELIST env var.
+ */
+export async function flushOracleWhitelistCache(): Promise<void> {
+  try {
+    await redis.del(WHITELIST_REDIS_KEY);
+    logger.info('flushOracleWhitelistCache: whitelist cache flushed');
+  } catch (err) {
+    logger.error({ err }, 'flushOracleWhitelistCache: Redis error');
+    throw err;
+  }
 }
 
 // ─── ScVal helpers ────────────────────────────────────────────────────────────
@@ -103,7 +198,11 @@ function buildSignedMessage(match_id: string, outcomeIndex: number, reportedAtMs
  *   [2] reported_at:    u64          → ScvU64
  *   [3] signature:      BytesN<64>   → ScvBytes
  *   [4] oracle_address: Address      → ScvAddress
- *   [5] pub_key:        BytesN<32>   → ScvBytes
+ *   [5] pub_key:        BytesN<32>   → ScvBytes  (raw Ed25519 key, for transparency only)
+ *
+ * NOTE: The on-chain resolve_market uses the pub_key stored in ORACLE_WHITELIST
+ * (registered by admin via add_oracle) for signature verification — NOT report.pub_key.
+ * Passing rawPublicKey() here keeps the report self-describing for off-chain indexers.
  */
 function buildOracleReportScVal(
   match_id: string,
@@ -177,7 +276,12 @@ export async function fetchExternalFightResult(match_id: string): Promise<FightO
       throw new Error(`Boxing API responded ${response.status} for match_id=${match_id}`);
     }
 
-    const body = (await response.json()) as BoxingApiResponse;
+    const rawBody = await response.json();
+    const parsed = boxingApiResponseSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      throw new Error(`Boxing API returned malformed response for match_id=${match_id}: ${parsed.error.message}`);
+    }
+    const body = parsed.data;
     const fight = body.fights?.find((f) => f.fight_id === match_id);
 
     if (!fight) {
@@ -270,7 +374,12 @@ export async function fetchFallbackResult(match_id: string): Promise<FightOutcom
       throw new Error(`Fallback boxing API responded ${response.status} for match_id=${match_id}`);
     }
 
-    const body = (await response.json()) as BoxingApiResponse;
+    const rawBody = await response.json();
+    const parsed = boxingApiResponseSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      throw new Error(`Fallback API returned malformed response for match_id=${match_id}: ${parsed.error.message}`);
+    }
+    const body = parsed.data;
     const fight = body.fights?.find((f) => f.fight_id === match_id);
 
     if (!fight) {
@@ -384,6 +493,7 @@ export async function runAutoResolutionJob(): Promise<{ resolved: number; skippe
           await invokeContract(contract_address, 'cancel_market', [callerScVal, reasonScVal]);
           stats.resolved++;
           logger.info({ market_id, match_id }, 'runAutoResolutionJob: market auto-cancelled');
+          await clearFailureTracking(market_id);
         } else {
           logger.info({ market_id, match_id }, 'runAutoResolutionJob: no confirmed result yet, skipping');
           stats.skipped++;
@@ -399,6 +509,7 @@ export async function runAutoResolutionJob(): Promise<{ resolved: number; skippe
         { market_id, match_id, outcome },
         'runAutoResolutionJob: fight result submitted successfully',
       );
+      await clearFailureTracking(market_id);
     } catch (err) {
       // Step 5: Log the error but continue processing remaining markets
       logger.error(
@@ -406,6 +517,10 @@ export async function runAutoResolutionJob(): Promise<{ resolved: number; skippe
         'runAutoResolutionJob: error processing market, requires manual review',
       );
       stats.failed++;
+      const shouldSendAlert = await trackFailure(market_id);
+      if (shouldSendAlert) {
+        await sendAlert(market_id, match_id);
+      }
     }
   }
 

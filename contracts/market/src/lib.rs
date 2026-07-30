@@ -1,6 +1,6 @@
 #![no_std]
 //! ============================================================
-//! BOXMEOUT — Market Contract (Security-Audited Implementation)
+//! BANKERCHANGER — Market Contract (Security-Audited Implementation)
 //! All fund-moving functions follow Checks-Effects-Interactions.
 //! require_auth() is always the first call in fund-moving fns.
 //! Emergency pause guard precedes every fund-moving operation.
@@ -39,10 +39,17 @@ const PENDING_REPORTS: &str = "PENDING_REPORTS";
 /// Maximum TTL for market data (30 days in ledger entries)
 const MAX_TTL: u32 = 2_592_000;
 
+/// Maximum price impact (slippage) allowed per bet, in basis points.
+/// A bet that would move the AMM price by more than this is rejected.
+/// 3000 bps = 30% — protects bettors from placing inadvertently large
+/// orders into thin pools that would give them very poor execution.
+const MAX_SLIPPAGE_BPS: i128 = 3_000;
+
 // ─── Cross-contract client for oracle whitelist check ─────────────────────────
 #[contractclient(name = "FactoryClient")]
 pub trait FactoryInterface {
     fn get_oracles(env: Env) -> Vec<Address>;
+    fn get_oracle_key(env: Env, oracle: Address) -> Option<BytesN<32>>;
     fn is_paused(env: Env) -> bool;
 }
 
@@ -105,6 +112,16 @@ impl Market {
         let client = FactoryClient::new(env, &factory);
         let oracles = client.get_oracles();
         Ok(oracles.contains(caller.clone()))
+    }
+
+    /// Returns the raw Ed25519 public key for `caller` if they are whitelisted, or None.
+    fn get_oracle_raw_key(env: &Env, caller: &Address) -> Result<Option<BytesN<32>>, ContractError> {
+        let factory: Address = env
+            .storage().persistent()
+            .get(&FACTORY)
+            .ok_or(ContractError::NotFactory)?;
+        let client = FactoryClient::new(env, &factory);
+        Ok(client.get_oracle_key(caller.clone()))
     }
 
     /// Extend TTL on market data entries to prevent premature expiration.
@@ -208,11 +225,36 @@ impl Market {
             return Err(ContractError::BettingClosed);
         }
 
-        if amount < state.config.min_bet {
-            return Err(ContractError::BetTooLow);
+        if amount < state.config.min_bet_amount {
+            return Err(ContractError::BelowMinimum);
         }
         if amount > state.config.max_bet {
             return Err(ContractError::BetTooLarge);
+        }
+
+        // Slippage / price-impact sanity check.
+        // Compute the AMM price impact of this bet. If the pool is so thin that
+        // the bet would move the price by more than MAX_SLIPPAGE_BPS (30%), reject
+        // it to protect bettors from catastrophically bad execution.
+        // The check only applies when all pools are initialised (> 0); when a pool
+        // is still zero the AMM is not yet active and we skip the check.
+        if state.pool_a > 0 && state.pool_b > 0 && state.pool_draw > 0 {
+            let side_byte: u8 = match side {
+                BetSide::FighterA => 0,
+                BetSide::FighterB => 1,
+                BetSide::Draw     => 2,
+            };
+            if let Some((_shares, impact_bps)) = boxmeout_shared::amm::compute_odds(
+                state.pool_a,
+                state.pool_b,
+                state.pool_draw,
+                amount,
+                side_byte,
+            ) {
+                if impact_bps > MAX_SLIPPAGE_BPS {
+                    return Err(ContractError::BetTooLarge);
+                }
+            }
         }
 
         // ── EFFECTS ───────────────────────────────────────────────────────────
@@ -300,6 +342,7 @@ impl Market {
         // EFFECTS
         state.status = MarketStatus::Locked;
         Self::save_state(&env, &state);
+        Self::extend_market_ttl(&env);
 
         boxmeout_shared::emit_market_locked(&env, state.market_id);
         Ok(())
@@ -329,6 +372,11 @@ impl Market {
             return Err(ContractError::NotOracle);
         }
 
+        // Look up the whitelisted raw public key for this oracle address.
+        // This is the authoritative 32-byte Ed25519 key registered by the admin.
+        let whitelisted_pub_key: BytesN<32> = Self::get_oracle_raw_key(&env, &oracle)?
+            .ok_or(ContractError::NotOracle)?;
+
         let mut state = Self::load_state(&env)?;
         if state.status != MarketStatus::Locked {
             return Err(ContractError::InvalidMarketStatus);
@@ -345,6 +393,8 @@ impl Market {
         }
 
         // Verify Ed25519 signature over concat(match_id_bytes, outcome_byte, reported_at_be)
+        // Use the authoritative key from the whitelist — NOT report.pub_key — to prevent
+        // a malicious oracle from substituting a different key in the report payload.
         {
             use soroban_sdk::Bytes;
             use soroban_sdk::xdr::ToXdr;
@@ -361,7 +411,9 @@ impl Market {
             for b in report.reported_at.to_be_bytes().iter() {
                 msg.push_back(*b);
             }
-            env.crypto().ed25519_verify(&report.pub_key, &msg, &report.signature);
+            // whitelisted_pub_key is the raw 32-byte Ed25519 key registered by the admin.
+            // This is correct — unlike oracle.to_string().to_bytes() which is base32-encoded.
+            env.crypto().ed25519_verify(&whitelisted_pub_key, &msg, &report.signature);
         }
 
         // EFFECTS — 2-of-3 consensus logic
@@ -398,6 +450,7 @@ impl Market {
             state.resolved_at = env.ledger().timestamp();
             state.oracle_used = OptionalOracleRole::Some(OracleRole::Primary);
             Self::save_state(&env, &state);
+            Self::extend_market_ttl(&env);
             
             // Clear pending reports
             env.storage().persistent().set(&PENDING_REPORTS, &Map::<Address, OracleReport>::new(&env));
@@ -542,6 +595,7 @@ impl Market {
 
         // ── CLEANUP ───────────────────────────────────────────────────────────
         env.storage().instance().set(&CLAIMING, &false);
+        Self::extend_market_ttl(&env);
 
         boxmeout_shared::emit_winnings_claimed(&env, state.market_id, receipt.clone());
         Ok(receipt)
@@ -615,6 +669,7 @@ impl Market {
 
         // ── CLEANUP ───────────────────────────────────────────────────────────
         env.storage().instance().set(&CLAIMING, &false);
+        Self::extend_market_ttl(&env);
 
         boxmeout_shared::emit_refund_claimed(&env, state.market_id, bettor, refund_total);
         Ok(refund_total)
@@ -654,6 +709,7 @@ impl Market {
 
         state.status = MarketStatus::Cancelled;
         Self::save_state(&env, &state);
+        Self::extend_market_ttl(&env);
 
         boxmeout_shared::emit_market_cancelled(&env, state.market_id, reason);
         Ok(())
@@ -691,6 +747,7 @@ impl Market {
 
         state.status = MarketStatus::Disputed;
         Self::save_state(&env, &state);
+        Self::extend_market_ttl(&env);
 
         boxmeout_shared::emit_market_disputed(&env, state.market_id, reason);
         Ok(())
@@ -717,7 +774,23 @@ impl Market {
             .get(&FACTORY)
             .ok_or(ContractError::NotFactory)?;
         if admin != factory {
-              return Err(ContractError::NotAdmin);
+            return Err(ContractError::NotAdmin);
+        }
+
+        let mut state = Self::load_state(&env)?;
+        if state.status != MarketStatus::Disputed {
+            return Err(ContractError::InvalidMarketStatus);
+        }
+
+        // EFFECTS
+        state.outcome = OptionalOutcome::Some(final_outcome.clone());
+        state.status = MarketStatus::Resolved;
+        state.resolved_at = env.ledger().timestamp();
+        state.oracle_used = OptionalOracleRole::Some(OracleRole::Admin);
+        Self::save_state(&env, &state);
+        Self::extend_market_ttl(&env);
+
+        boxmeout_shared::emit_market_resolved(&env, state.market_id, final_outcome, admin);
         Ok(())
     }
 

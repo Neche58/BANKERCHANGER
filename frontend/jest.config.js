@@ -7,6 +7,18 @@ const sharedModuleNameMapper = { '^@/(.*)$': '<rootDir>/src/$1' };
 
 module.exports = {
   projects: [
+    // Utility tests — no MSW setup
+    {
+      displayName: 'utils',
+      testEnvironment: 'node',
+      roots: ['<rootDir>/src/__tests__/utils'],
+      testMatch: ['**/*.test.[jt]s?(x)'],
+      moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
+      transform: sharedTransform,
+      moduleNameMapper: sharedModuleNameMapper,
+      testPathIgnorePatterns: ['/node_modules/'],
+      globals: { 'ts-jest': { isolatedModules: true } },
+    },
     // Component tests — no MSW setup
     {
       displayName: 'components',
@@ -54,9 +66,18 @@ module.exports = {
       globals: { 'ts-jest': { isolatedModules: true } },
     },
   ],
+  collectCoverage: true,
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
     '!src/**/*.d.ts',
     '!src/**/__tests__/**',
   ],
+  coverageThreshold: {
+    global: {
+      branches: 70,
+      functions: 70,
+      lines: 70,
+      statements: 70,
+    },
+  },
 };

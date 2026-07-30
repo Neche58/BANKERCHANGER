@@ -8,7 +8,7 @@ import { ThemeToggle } from './ThemeToggle';
 
 const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? 'testnet';
 const IS_MAINNET = NETWORK === 'mainnet';
-const BANNER_KEY = 'boxmeout_mainnet_banner_dismissed';
+const BANNER_KEY = 'bankerchanger_mainnet_banner_dismissed';
 
 const NAV_LINKS: Array<{ href: string; label: string; adminOnly?: boolean }> = [
   { href: '/', label: 'Home' },
@@ -33,11 +33,11 @@ export function Header(): JSX.Element {
   };
 
   const linkClass = (href: string) =>
-    `hover:text-white transition-colors ${pathname === href ? 'text-white font-semibold border-b-2 border-amber-500 pb-0.5' : 'text-gray-400'}`;
+    `hover:text-gray-900 dark:hover:text-white transition-colors ${pathname === href ? 'text-gray-900 dark:text-white font-semibold border-b-2 border-amber-500 pb-0.5' : 'text-gray-600 dark:text-gray-400'}`;
 
   // Matches /create/page.tsx admin logic
   const connectedAddress =
-    typeof window === 'undefined' ? null : sessionStorage.getItem('boxmeout_wallet_address');
+    typeof window === 'undefined' ? null : sessionStorage.getItem('bankerchanger_wallet_address');
   const adminAddresses = (process.env.NEXT_PUBLIC_ADMIN_ADDRESSES ?? '')
     .split(',')
     .map((a) => a.trim())
@@ -60,10 +60,10 @@ export function Header(): JSX.Element {
         </div>
       )}
 
-      <header className="sticky top-0 z-40 bg-gray-950 dark:bg-gray-950 border-b border-gray-800 dark:border-gray-800">
+      <header className="sticky top-0 z-40 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 transition-colors">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-6">
           <Link href="/" className="font-black text-amber-500 text-xl tracking-tight">
-            BOXMEOUT
+            BANKERCHANGER
           </Link>
 
           {/* Desktop nav */}
@@ -88,7 +88,7 @@ export function Header(): JSX.Element {
 
             {/* Mobile hamburger */}
             <button
-              className="md:hidden flex items-center justify-center w-11 h-11 text-gray-400 hover:text-white"
+              className="md:hidden flex items-center justify-center w-11 h-11 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
               onClick={() => setMenuOpen((o) => !o)}
               aria-label="Toggle menu"
               aria-expanded={menuOpen}
@@ -101,7 +101,7 @@ export function Header(): JSX.Element {
         {/* Mobile nav drawer */}
         {menuOpen && (
           <nav
-            className="md:hidden bg-gray-950 border-t border-gray-800 px-4 py-2 flex flex-col text-sm"
+            className="md:hidden bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 px-4 py-2 flex flex-col text-sm transition-colors"
             aria-label="Mobile navigation"
           >
             {visibleNavLinks.map(({ href, label }) => (

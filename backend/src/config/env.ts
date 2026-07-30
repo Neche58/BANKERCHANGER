@@ -5,7 +5,13 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url('DATABASE_URL must be a valid URL'),
   REDIS_URL: z.string().url('REDIS_URL must be a valid URL'),
   STELLAR_RPC_URL: z.string().url('STELLAR_RPC_URL must be a valid URL'),
-  ORACLE_KEYPAIR: z.string().min(1, 'ORACLE_KEYPAIR is required'),
+  ORACLE_PRIVATE_KEY: z
+    .string()
+    .min(1, 'ORACLE_PRIVATE_KEY is required')
+    .refine(
+      (v) => /^S[A-Z2-7]{55}$/.test(v),
+      'ORACLE_PRIVATE_KEY must be a valid Stellar secret key (56-char base32 starting with S)',
+    ),
   ADMIN_JWT_SECRET: z.string().min(1, 'ADMIN_JWT_SECRET is required'),
   FACTORY_CONTRACT_ADDRESS: z.string().min(1, 'FACTORY_CONTRACT_ADDRESS is required'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -22,6 +28,11 @@ const envSchema = z.object({
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   BOXING_API_URL: z.string().url().optional(),
   SENTRY_DSN: z.string().url().optional(),
+  ALERT_WEBHOOK_URL: z.string().url().optional(),
+  DB_POOL_MAX: z.coerce.number().int().positive().default(10),
+  DB_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
 });
 
 export type Env = z.infer<typeof envSchema>;

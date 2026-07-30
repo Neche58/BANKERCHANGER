@@ -1,6 +1,6 @@
 #![no_std]
 //! ============================================================
-//! BOXMEOUT — Treasury Contract (Security-Audited)
+//! BANKERCHANGER — Treasury Contract (Security-Audited)
 //! All fund-moving functions follow Checks-Effects-Interactions.
 //! require_auth() is always the first call.
 //! ============================================================
@@ -18,6 +18,7 @@ const APPROVED_MARKETS: &str        = "APPROVED_MARKETS";
 const WITHDRAWAL_LIMIT: &str        = "WITHDRAWAL_LIMIT";
 const DAILY_WITHDRAWN: &str         = "DAILY_WITHDRAWN";
 const WITHDRAWALS_PAUSED: &str      = "WITHDRAWALS_PAUSED";
+const MIN_WITHDRAWAL: i128          = 10_000_000; // 1 XLM in stroops
 
 #[contract]
 pub struct Treasury;
@@ -36,6 +37,21 @@ impl Treasury {
 
     fn day_bucket(env: &Env) -> u64 {
         env.ledger().timestamp() / 86400
+    }
+
+    /// Prune DAILY_WITHDRAWN to keep only the current bucket and the one before it.
+    /// Called on every withdrawal so the map never grows beyond 2 entries.
+    fn prune_daily_withdrawn(env: &Env, daily: &mut Map<u64, i128>, current_bucket: u64) {
+        // Collect keys older than current_bucket - 1 (keep current and previous)
+        let mut stale: Vec<u64> = Vec::new(env);
+        for (k, _) in daily.iter() {
+            if k + 1 < current_bucket {
+                stale.push_back(k);
+            }
+        }
+        for k in stale.iter() {
+            daily.remove(k);
+        }
     }
 
     fn add_to_accumulated_token(env: &Env, token: &Address, amount: i128) {
@@ -200,6 +216,7 @@ impl Treasury {
     ///
     /// # Errors
     /// - `Unauthorized`: Caller is not the admin
+    /// - `BelowMinimum`: Withdrawal amount is below minimum (1 XLM)
     /// - `DailyWithdrawalLimitExceeded`: Withdrawal exceeds daily limit
     /// - `InsufficientBalance`: Not enough fees accumulated
     ///
@@ -217,6 +234,11 @@ impl Treasury {
         // CHECKS
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
+
+        // Check minimum withdrawal amount
+        if amount < MIN_WITHDRAWAL {
+            return Err(ContractError::BelowMinimum);
+        }
 
         // Check paused flag
         let paused: bool = env.storage().persistent().get(&WITHDRAWALS_PAUSED).unwrap_or(false);
@@ -248,6 +270,8 @@ impl Treasury {
         fees.set(token.clone(), balance - amount);
         env.storage().persistent().set(&ACCUMULATED_FEES, &fees);
         daily.set(bucket, today_total + amount);
+        // Prune stale day-buckets so the map never grows beyond 2 entries
+        Self::prune_daily_withdrawn(&env, &mut daily, bucket);
         env.storage().persistent().set(&DAILY_WITHDRAWN, &daily);
 
         // INTERACTIONS
@@ -774,5 +798,41 @@ mod treasury_lifecycle_tests {
         let dest = Address::generate(&env);
         let result = client.try_withdraw_fees(&non_admin, &token, &1i128, &dest);
         assert!(result.is_err());
+    }
+
+    // ── Minimum withdrawal validation ────────────────────────────────────────
+
+    #[test]
+    fn test_withdrawal_below_minimum_rejected() {
+        let env = Env::default();
+        let limit = 1_000_000i128;
+        let (client, admin, market, token) = setup(&env, limit);
+        StellarAssetClient::new(&env, &token).mint(&market, &limit);
+
+        client.approve_market(&admin, &market);
+        client.deposit_fees(&market, &token, &limit);
+
+        let dest = Address::generate(&env);
+        // Try to withdraw less than minimum (1 XLM / 10_000_000 stroops)
+        let result = client.try_withdraw_fees(&admin, &token, &9_999_999i128, &dest);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_withdrawal_at_minimum_accepted() {
+        let env = Env::default();
+        let limit = 1_000_000i128;
+        let (client, admin, market, token) = setup(&env, limit);
+        StellarAssetClient::new(&env, &token).mint(&market, &limit);
+
+        client.approve_market(&admin, &market);
+        client.deposit_fees(&market, &token, &limit);
+
+        let dest = Address::generate(&env);
+        // Withdraw exactly minimum (1 XLM)
+        client.withdraw_fees(&admin, &token, &10_000_000i128, &dest);
+
+        assert_eq!(client.get_accumulated_fees(&token), limit - 10_000_000i128);
+        assert_eq!(soroban_sdk::token::Client::new(&env, &token).balance(&dest), 10_000_000i128);
     }
 }

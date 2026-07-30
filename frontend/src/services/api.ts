@@ -1,5 +1,5 @@
 // ============================================================
-// BOXMEOUT — API Service
+// BANKERCHANGER — API Service
 // Typed wrappers around the backend REST endpoints.
 // Base URL is set from NEXT_PUBLIC_API_URL env variable.
 // Contributors: implement every function marked TODO.
@@ -22,12 +22,26 @@ export class NetworkError extends Error {
   constructor(message = 'Network error') { super(message); this.name = 'NetworkError'; }
 }
 
+export class TimeoutError extends Error {
+  constructor(message = 'Request timeout (10s)') { super(message); this.name = 'TimeoutError'; }
+}
+
+const TIMEOUT_MS = 10000; // 10 seconds
+
 async function apiFetch<T>(path: string): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`);
+    res = await fetch(`${API_BASE}${path}`, { signal: controller.signal });
   } catch (e) {
+    if ((e as Error).name === 'AbortError') {
+      throw new TimeoutError();
+    }
     throw new NetworkError((e as Error).message);
+  } finally {
+    clearTimeout(timeoutId);
   }
   if (res.status === 404) throw new NotFoundError();
   if (!res.ok) throw new NetworkError(`Unexpected response: ${res.status}`);
@@ -38,6 +52,7 @@ export interface MarketFilters {
   status?: string;
   weight_class?: string;
   search?: string;
+  sort?: 'date_asc' | 'date_desc' | 'pool_desc';
 }
 
 export interface PaginationParams {
@@ -65,6 +80,7 @@ export async function fetchMarkets(
   if (filters?.status) params.set('status', filters.status);
   if (filters?.weight_class) params.set('weight_class', filters.weight_class);
   if (filters?.search) params.set('search', filters.search);
+  if (filters?.sort) params.set('sort', filters.sort);
   if (pagination?.page) params.set('page', pagination.page.toString());
   if (pagination?.limit) params.set('limit', pagination.limit.toString());
   const qs = params.toString();

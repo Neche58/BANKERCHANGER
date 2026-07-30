@@ -2,10 +2,11 @@
  * Integration tests for StellarIndexer handlers.
  *
  * Requires a running PostgreSQL instance pointed to by DATABASE_URL.
- * Default: postgresql://boxmeout:boxmeout@localhost:5433/boxmeout_test
+ * Default: postgresql://bankerchanger:bankerchanger@localhost:5433/bankerchanger_test
  * Start with: docker compose --profile test up -d postgres-test
  */
 
+import { randomUUID } from 'crypto';
 import { Pool } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -19,7 +20,7 @@ import {
 
 // Point the pool at the test DB
 process.env.DATABASE_URL =
-  process.env.DATABASE_URL ?? 'postgresql://boxmeout:boxmeout@localhost:5433/boxmeout_test';
+  process.env.DATABASE_URL ?? 'postgresql://bankerchanger:bankerchanger@localhost:5433/bankerchanger_test';
 
 // Re-import pool AFTER env is set
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -46,7 +47,7 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
   return rows as T[];
 }
 
-const MARKET_ID = 'mkt-test-1';
+const MARKET_ID = `mkt-${randomUUID()}`;
 const BETTOR = 'GBETTOR1';
 
 const marketEvent = () =>
@@ -73,6 +74,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  await pool.query('TRUNCATE markets, bets CASCADE');
   await pool.end();
 });
 

@@ -5,15 +5,15 @@ services:
     image: postgres:15-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: boxmeout
-      POSTGRES_PASSWORD: boxmeout
-      POSTGRES_DB: boxmeout
+      POSTGRES_USER: bankerchanger
+      POSTGRES_PASSWORD: bankerchanger
+      POSTGRES_DB: bankerchanger
     ports:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U boxmeout']
+      test: ['CMD-SHELL', 'pg_isready -U bankerchanger']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,6 +29,17 @@ services:
       timeout: 5s
       retries: 5
 
+  indexer:
+    build: ./indexer
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    env_file: ./indexer/.env
+    ports:
+      - '3002:3002'
+    volumes:
+      - indexer_data:/app/data
+
   backend:
     build: ./backend
     restart: unless-stopped
@@ -37,9 +48,23 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      indexer:
+        condition: service_started
     env_file: ./backend/.env
     ports:
       - '3001:3001'
+
+  indexer:
+    build: ./indexer
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file: ./backend/.env
+    environment:
+      - FACTORY_CONTRACT_ADDRESS=${FACTORY_CONTRACT_ADDRESS}
+      - SOROBAN_RPC_URL=${STELLAR_RPC_URL:-https://soroban-testnet.stellar.org}
+    volumes:
+      - indexer_data:/app/data
 
   frontend:
     build: ./frontend
@@ -54,9 +79,9 @@ services:
     image: postgres:15-alpine
     profiles: [test]
     environment:
-      POSTGRES_USER: boxmeout
-      POSTGRES_PASSWORD: boxmeout
-      POSTGRES_DB: boxmeout_test
+      POSTGRES_USER: bankerchanger
+      POSTGRES_PASSWORD: bankerchanger
+      POSTGRES_DB: bankerchanger_test
     ports:
       - '5433:5432'
     tmpfs:
@@ -64,3 +89,4 @@ services:
 
 volumes:
   postgres_data:
+  indexer_data:

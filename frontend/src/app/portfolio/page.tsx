@@ -1,7 +1,7 @@
 'use client';
 
 // ============================================================
-// BOXMEOUT — Portfolio Page (/portfolio)
+// BANKERCHANGER — Portfolio Page (/portfolio)
 // ============================================================
 
 import { useMemo, useCallback, useState, useEffect } from 'react';

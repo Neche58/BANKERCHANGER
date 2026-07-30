@@ -1,5 +1,5 @@
 //! ============================================================
-//! BOXMEOUT — Contract Events
+//! BANKERCHANGER — Contract Events
 //! All emitted events are defined here for consistency.
 //! ============================================================
 
@@ -88,6 +88,16 @@ pub fn emit_dispute_resolved(env: &Env, market_id: u64, final_outcome: Outcome) 
     env.events().publish(topics, final_outcome);
 }
 
+/// Emits an `admin_proposed` event when the current admin nominates a successor.
+/// The transfer is not final until the nominee calls `accept_admin`.
+///
+/// Topics: `(Symbol("admin_proposed"),)`
+/// Data:   `(current_admin, proposed_admin)`
+pub fn emit_admin_proposed(env: &Env, current_admin: Address, proposed_admin: Address) {
+    let topics = (Symbol::new(env, "admin_proposed"),);
+    env.events().publish(topics, (current_admin, proposed_admin));
+}
+
 /// Emits an `admin_transferred` event when admin privileges change hands.
 ///
 /// Topics: `(Symbol("admin_transferred"),)`
@@ -145,6 +155,16 @@ pub fn emit_conflicting_oracle_report(env: &Env, market_id: u64, oracle_address:
 pub fn emit_contract_upgraded(env: &Env, new_wasm_hash: soroban_sdk::BytesN<32>) {
     let topics = (Symbol::new(env, "contract_upgraded"),);
     env.events().publish(topics, new_wasm_hash);
+}
+
+/// Emits a `stale_reports_cleared` event when the admin removes expired pending
+/// oracle reports so a fresh resolution cycle can begin.
+///
+/// Topics: `(Symbol("stale_reports_cleared"), market_id)`
+/// Data:   `cleared_count: u32`
+pub fn emit_stale_reports_cleared(env: &Env, market_id: u64, cleared_count: u32) {
+    let topics = (Symbol::new(env, "stale_reports_cleared"), market_id);
+    env.events().publish(topics, cleared_count);
 }
 
 #[cfg(test)]

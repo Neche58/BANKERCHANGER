@@ -1,20 +1,29 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { randomUUID, createHash } from 'crypto';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { eq, and } from 'drizzle-orm';
+import * as schema from '../db/schema';
 import { encrypt, decrypt } from './crypto.service';
 import { generateSecret, generateQRCode, verifyToken } from './totp.service';
-import { sendPasswordResetEmail } from './email.service';
+import { sendPasswordResetEmail, sendEmail } from './email.service';
 import { redis } from './cache.service';
+import { pool } from '../config/db';
+import { getEnv } from '../config/env';
+import { password_reset_tokens, users } from '../db/schema';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
 
-const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-jwt-secret-change-me';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '15m';
-const REFRESH_EXPIRES_IN = process.env.REFRESH_EXPIRES_IN ?? '7d';
+const env = getEnv();
+const JWT_SECRET = env.JWT_SECRET;
+const JWT_EXPIRES_IN = env.JWT_EXPIRES_IN || '15m';
+const REFRESH_EXPIRES_IN = env.REFRESH_EXPIRES_IN || '7d';
+const VERIFY_EMAIL_URL = env.VERIFY_EMAIL_URL || 'http://localhost:3001/auth/verify-email';
 const TEMP_TOKEN_EXPIRES_IN = '5m';
 const RESET_TOKEN_EXPIRES_IN = '15m';
 const BCRYPT_ROUNDS = 12;
-const VERIFY_EMAIL_URL = process.env.VERIFY_EMAIL_URL ?? 'http://localhost:3001/auth/verify-email';
+
+const db = drizzle(pool, { schema });
 
 async function generateEmailVerificationToken(userId: string): Promise<string> {
   const token = randomUUID();
@@ -23,43 +32,29 @@ async function generateEmailVerificationToken(userId: string): Promise<string> {
 }
 
 async function sendVerificationEmail(email: string, token: string, url: string): Promise<boolean> {
-  // Stubbed email delivery for dev/test. In production, use a real email service.
-  logger.info({ email, url: `${url}?token=${token}` }, 'Email verification link generated');
-  return true;
-}
+  // In test mode, stub the email (don't actually send)
+  if (process.env.NODE_ENV === 'test') {
+    logger.info({ email, url: `${url}?token=${token}` }, 'Email verification link generated (test mode)');
+    return true;
+  }
 
-// ---------------------------------------------------------------------------
-// In-memory user store — replace with DB queries in production
-// ---------------------------------------------------------------------------
-interface UserRecord {
-  id: string;
-  email: string;
-  passwordHash: string;
-  emailVerified: boolean;
-  emailVerificationToken?: string; // UUID stored in Redis
-  twoFactorSecret?: string;   // AES-GCM encrypted base32 secret
-  twoFactorEnabled: boolean;
-  /**
-   * Monotonically increasing version number.
-   * Stored inside every issued access/refresh token.
-   * Incrementing it instantly invalidates all previously issued tokens.
-   */
-  sessionVersion: number;
-  /**
-   * SHA-256 hash of the most recently issued password-reset JWT.
-   * Cleared on use so the token can only be consumed once.
-   */
-  resetTokenHash?: string;
+  // Send real verification email
+  try {
+    const verifyUrl = `${url}?token=${token}`;
+    await sendEmail(email, 'verify_email', { verifyUrl });
+    return true;
+  } catch (err) {
+    logger.error({ msg: 'Failed to send verification email', email, error: err });
+    return false;
+  }
 }
-
-export const users = new Map<string, UserRecord>();
 
 // ---------------------------------------------------------------------------
 // JWT helpers
 // ---------------------------------------------------------------------------
-function signAccess(userId: string, sessionVersion: number): string {
+function signAccess(userId: string, sessionVersion: number, role?: string): string {
   return jwt.sign(
-    { sub: userId, type: 'access', sv: sessionVersion },
+    { sub: userId, type: 'access', sv: sessionVersion, ...(role && { role }) },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions,
   );
@@ -85,8 +80,16 @@ function signReset(userId: string): string {
   } as jwt.SignOptions);
 }
 
-function verifyJwt(token: string, expectedType: string): jwt.JwtPayload {
-  const payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+export function verifyJwt(token: string, expectedType: string): jwt.JwtPayload {
+  let payload: jwt.JwtPayload;
+  try {
+    payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      throw new AppError(401, 'Token has expired');
+    }
+    throw new AppError(401, 'Invalid token');
+  }
   if (payload.type !== expectedType) throw new AppError(401, 'Invalid token type');
   return payload;
 }
@@ -127,9 +130,11 @@ export async function isSessionRevoked(userId: string, sessionVersion: number): 
   return val !== null;
 }
 
-export function isEmailVerified(userId: string): boolean {
-  const user = users.get(userId);
-  return !!user?.emailVerified;
+export async function isEmailVerified(userId: string): Promise<boolean> {
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+  });
+  return !!user?.email_verified;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,33 +150,34 @@ export async function register(
   password: string,
 ): Promise<{ userId: string; message: string }> {
   // Check if user already exists
-  const existing = [...users.values()].find((u) => u.email === email);
+  const existing = await db.query.users.findFirst({
+    where: eq(users.email, email),
+  });
   if (existing) {
     throw new AppError(409, 'Email already registered');
   }
 
   // Create user
   const userId = randomUUID();
-  const user: UserRecord = {
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  
+  await db.insert(users).values({
     id: userId,
     email,
-    passwordHash: password, // TODO: hash with bcrypt
-    emailVerified: false,
-    twoFactorEnabled: false,
-    sessionVersion: 0,
-  };
-  users.set(userId, user);
+    password_hash: passwordHash,
+    email_verified: false,
+    two_factor_enabled: false,
+    session_version: 0,
+  });
 
-  // Generate verification token
+  // Generate verification token (stored in Redis)
   const token = await generateEmailVerificationToken(userId);
-  user.emailVerificationToken = token;
-  users.set(userId, user);
 
   // Send verification email
   const sent = await sendVerificationEmail(email, token, VERIFY_EMAIL_URL);
   if (!sent) {
     // Clean up user if email send fails
-    users.delete(userId);
+    await db.delete(users).where(eq(users.id, userId));
     throw new AppError(500, 'Failed to send verification email');
   }
 
@@ -183,29 +189,46 @@ export async function register(
   };
 }
 
-/** Stub login — replace with real password check against DB */
 export async function login(
   email: string,
   password: string,
 ): Promise<{ accessToken: string; refreshToken: string } | { requires2FA: true; tempToken: string }> {
-  const user = [...users.values()].find((u) => u.email === email);
+  const user = await db.query.users.findFirst({
+    where: eq(users.email, email),
+  });
   if (!user) throw new AppError(401, 'Invalid credentials');
 
-  const passwordValid = await bcrypt.compare(password, user.passwordHash);
+  const passwordValid = await bcrypt.compare(password, user.password_hash);
   if (!passwordValid) throw new AppError(401, 'Invalid credentials');
 
-  if (user.twoFactorEnabled) {
+  if (user.two_factor_enabled) {
     return { requires2FA: true, tempToken: signTemp(user.id) };
   }
 
   return {
-    accessToken: signAccess(user.id, user.sessionVersion),
-    refreshToken: signRefresh(user.id, user.sessionVersion),
+    accessToken: signAccess(user.id, user.session_version, user.role === 'admin' ? 'admin' : undefined),
+    refreshToken: signRefresh(user.id, user.session_version),
   };
 }
 
 // ---------------------------------------------------------------------------
 // Password reset flow
+// ---------------------------------------------------------------------------
+//
+// Design note (#357): password reset tokens are stored ONLY in the
+// `password_reset_tokens` DB table. Redis is intentionally NOT used here.
+//
+// Rationale: using the DB as the single source of truth means a Redis flush
+// or restart cannot make a consumed token reusable. Single-use enforcement
+// is achieved by deleting the row in step 4 of resetPassword() before
+// touching the user record.
+//
+// Redis in this file is only used for:
+//   • email_verification tokens  (short-lived, loss-tolerant — user can re-request)
+//   • session revocation tombstones (blockOldSessions) — intentional fast-path
+//     to reject in-flight JWTs after a password change without a DB round-trip.
+//
+// Do NOT add Redis writes for password reset tokens here.
 // ---------------------------------------------------------------------------
 
 /**
@@ -215,7 +238,9 @@ export async function login(
  * to prevent user enumeration attacks.
  */
 export async function forgotPassword(email: string): Promise<void> {
-  const user = [...users.values()].find((u) => u.email === email);
+  const user = await db.query.users.findFirst({
+    where: eq(users.email, email),
+  });
 
   // No user → do nothing but don't reveal that fact to the caller
   if (!user) return;
@@ -223,9 +248,15 @@ export async function forgotPassword(email: string): Promise<void> {
   const resetToken = signReset(user.id);
   const tokenHash = await sha256(resetToken);
 
-  // Store hash so we can verify single-use on consumption
-  user.resetTokenHash = tokenHash;
-  users.set(user.id, user);
+  // Replace any existing tokens for this user, then insert the new one
+  await db.delete(password_reset_tokens)
+    .where(eq(password_reset_tokens.user_id, user.id));
+
+  await db.insert(password_reset_tokens).values({
+    user_id: user.id,
+    token_hash: tokenHash,
+    expires_at: new Date(Date.now() + 15 * 60 * 1000),
+  });
 
   // Fire-and-forget — failures are swallowed inside sendPasswordResetEmail
   await sendPasswordResetEmail(user.email, resetToken);
@@ -247,33 +278,52 @@ export async function resetPassword(token: string, newPassword: string): Promise
   }
 
   const userId = payload.sub as string;
-  const user = users.get(userId);
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+  });
   if (!user) throw new AppError(400, 'Invalid or expired reset token');
 
-  // 2. Verify single-use: token hash must match what we stored
-  if (!user.resetTokenHash) {
-    throw new AppError(400, 'Reset token has already been used');
-  }
-
   const incomingHash = await sha256(token);
-  if (incomingHash !== user.resetTokenHash) {
+
+  // 2. Look up the token in the database
+  const [tokenRecord] = await db
+    .select()
+    .from(password_reset_tokens)
+    .where(
+      and(
+        eq(password_reset_tokens.user_id, userId),
+        eq(password_reset_tokens.token_hash, incomingHash),
+      ),
+    )
+    .limit(1);
+
+  if (!tokenRecord) {
     throw new AppError(400, 'Invalid or expired reset token');
   }
 
-  // 3. Consume the token immediately (single-use enforcement)
-  user.resetTokenHash = undefined;
+  // 3. Check DB-level expiry (belt-and-suspenders with JWT expiry)
+  if (new Date() > new Date(tokenRecord.expires_at)) {
+    await db.delete(password_reset_tokens).where(eq(password_reset_tokens.id, tokenRecord.id));
+    throw new AppError(400, 'Reset token has expired');
+  }
 
-  // 4. Hash the new password
+  // 4. Consume the token immediately (single-use enforcement)
+  await db.delete(password_reset_tokens).where(eq(password_reset_tokens.id, tokenRecord.id));
+
+  // 5. Hash the new password
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
-  user.passwordHash = passwordHash;
 
-  // 5. Invalidate all existing sessions by bumping the session version
-  const oldVersion = user.sessionVersion;
-  user.sessionVersion = oldVersion + 1;
+  // 6. Invalidate all existing sessions by bumping the session version
+  const oldVersion = user.session_version;
+  const newVersion = oldVersion + 1;
 
-  users.set(user.id, user);
+  await db.update(users).set({
+    password_hash: passwordHash,
+    session_version: newVersion,
+    updated_at: new Date(),
+  }).where(eq(users.id, userId));
 
-  // 6. Write tombstones to Redis so in-flight tokens are rejected immediately
+  // 7. Write tombstones to Redis so in-flight tokens are rejected immediately
   await blockOldSessions(userId, oldVersion);
 }
 
@@ -285,13 +335,19 @@ export async function resetPassword(token: string, newPassword: string): Promise
 export async function setup2FA(
   userId: string,
 ): Promise<{ qrCode: string; secret: string }> {
-  const user = users.get(userId);
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+  });
   if (!user) throw new AppError(404, 'User not found');
-  if (user.twoFactorEnabled) throw new AppError(400, '2FA already enabled');
+  if (user.two_factor_enabled) throw new AppError(400, '2FA already enabled');
 
   const { secret, otpauthUrl } = generateSecret(user.email);
-  user.twoFactorSecret = encrypt(secret);
-  users.set(userId, user);
+  const encryptedSecret = encrypt(secret);
+  
+  await db.update(users).set({
+    two_factor_secret: encryptedSecret,
+    updated_at: new Date(),
+  }).where(eq(users.id, userId));
 
   const qrCode = await generateQRCode(otpauthUrl);
   return { qrCode, secret };
@@ -299,30 +355,38 @@ export async function setup2FA(
 
 /** Step 2: confirm OTP to activate 2FA */
 export async function enable2FA(userId: string, otp: string): Promise<void> {
-  const user = users.get(userId);
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+  });
   if (!user) throw new AppError(404, 'User not found');
-  if (user.twoFactorEnabled) throw new AppError(400, '2FA already enabled');
-  if (!user.twoFactorSecret) throw new AppError(400, 'Run /auth/2fa/setup first');
+  if (user.two_factor_enabled) throw new AppError(400, '2FA already enabled');
+  if (!user.two_factor_secret) throw new AppError(400, 'Run /auth/2fa/setup first');
 
-  const secret = decrypt(user.twoFactorSecret);
+  const secret = decrypt(user.two_factor_secret);
   if (!verifyToken(secret, otp)) throw new AppError(401, 'Invalid or expired OTP');
 
-  user.twoFactorEnabled = true;
-  users.set(userId, user);
+  await db.update(users).set({
+    two_factor_enabled: true,
+    updated_at: new Date(),
+  }).where(eq(users.id, userId));
 }
 
 /** Disable 2FA — requires current OTP */
 export async function disable2FA(userId: string, otp: string): Promise<void> {
-  const user = users.get(userId);
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+  });
   if (!user) throw new AppError(404, 'User not found');
-  if (!user.twoFactorEnabled) throw new AppError(400, '2FA is not enabled');
+  if (!user.two_factor_enabled) throw new AppError(400, '2FA is not enabled');
 
-  const secret = decrypt(user.twoFactorSecret!);
+  const secret = decrypt(user.two_factor_secret!);
   if (!verifyToken(secret, otp)) throw new AppError(401, 'Invalid or expired OTP');
 
-  user.twoFactorEnabled = false;
-  user.twoFactorSecret = undefined;
-  users.set(userId, user);
+  await db.update(users).set({
+    two_factor_enabled: false,
+    two_factor_secret: null,
+    updated_at: new Date(),
+  }).where(eq(users.id, userId));
 }
 
 /** Second-step login: verify OTP from temp token, issue final JWT pair */
@@ -333,21 +397,20 @@ export async function verify2FA(
   const payload = verifyJwt(tempToken, 'temp_2fa');
   const userId = payload.sub as string;
 
-  const user = users.get(userId);
-  if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+  });
+  if (!user || !user.two_factor_enabled || !user.two_factor_secret) {
     throw new AppError(401, 'Invalid session');
   }
 
-  const secret = decrypt(user.twoFactorSecret);
+  const secret = decrypt(user.two_factor_secret);
   if (!verifyToken(secret, otp)) throw new AppError(401, 'Invalid or expired OTP');
 
   return {
-    accessToken: signAccess(userId, user.sessionVersion),
-    refreshToken: signRefresh(userId, user.sessionVersion),
+    accessToken: signAccess(userId, user.session_version, user.role === 'admin' ? 'admin' : undefined),
+    refreshToken: signRefresh(userId, user.session_version),
   };
 }
 
-export function isEmailVerified(userId: string): boolean {
-  const user = users.get(userId);
-  return user?.emailVerified ?? false;
-}
+

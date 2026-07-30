@@ -1,6 +1,12 @@
 import express from "express";
 import pinoHttp from "pino-http";
 import { validateEnv } from "./config/env";
+// Validate environment variables first before importing anything else that uses them!
+const env = validateEnv();
+
+import { version } from '../package.json';
+
+import { createCorsMiddleware } from "./config/cors";
 import { setupSwagger } from "./config/swagger";
 import { errorMiddleware } from "./middleware/error.middleware";
 import { initSentry, applySentryRequestHandler } from "./middleware/sentry.middleware";
@@ -8,6 +14,8 @@ import { rateLimit } from "./middleware/rate-limit.middleware";
 import { requestLogging } from "./middleware/request-logging.middleware";
 import { AppError } from "./utils/AppError";
 import { logger } from "./utils/logger";
+import { pool } from "./config/db";
+import { redis } from "./config/redis";
 import authRouter from "./routes/auth.routes";
 import marketRouter from "./routes/market.routes";
 import adminRouter from "./routes/admin.routes";
@@ -16,14 +24,15 @@ import claimsRouter from "./routes/bet.routes";
 import { startAutoResolutionCron, startAutoLockCron } from "./cron/autoResolution.cron";
 import { startCleanupCron } from "./cron/cleanup.cron";
 import { initActivityFeed } from "./websocket/realtime";
-
-// Validate environment variables on startup
-const env = validateEnv();
+import { register, httpRequestDuration, httpRequestsTotal } from "./services/metrics.service";
 
 // Initialise Sentry before any other code (captures unhandled rejections/exceptions)
 initSentry(env.SENTRY_DSN, env.NODE_ENV);
 
 const app = express();
+
+// CORS configuration - must be before other middleware
+app.use(createCorsMiddleware());
 
 // Middleware
 app.use(pinoHttp({ logger }));
@@ -35,9 +44,43 @@ if (env.NODE_ENV === 'development' || env.ENABLE_SWAGGER) {
   setupSwagger(app);
 }
 
+// Prometheus metrics endpoint (internal only — no auth required)
+app.get("/metrics", async (_req, res) => {
+  res.set("Content-Type", register.contentType);
+  res.end(await register.metrics());
+});
+
+// HTTP request metrics middleware
+app.use((req, res, next) => {
+  const end = httpRequestDuration.startTimer();
+  res.on("finish", () => {
+    const route = req.route?.path || req.path;
+    const labels = { method: req.method, route, status_code: String(res.statusCode) };
+    end(labels);
+    httpRequestsTotal.inc(labels);
+  });
+  next();
+});
+
 // Routes
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+app.get("/health", async (_req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    await redis.ping();
+    res.json({
+      status: "ok",
+      db: "connected",
+      redis: "connected",
+      version,
+      dbPool: {
+        totalCount: pool.totalCount,
+        idleCount: pool.idleCount,
+        waitingCount: pool.waitingCount,
+      },
+    });
+  } catch {
+    res.status(503).json({ status: "error" });
+  }
 });
 
 // Rate-limited route groups
@@ -105,6 +148,26 @@ const server = app.listen(PORT, () => {
   startAutoLockCron();
   startCleanupCron();
 });
+
+// Startup health check — catch misconfigured env vars or failed connections early
+(async function startupHealthCheck() {
+  const results: string[] = [];
+  try {
+    await pool.query("SELECT 1");
+    results.push("db: ok");
+  } catch (err) {
+    logger.error({ err }, "Startup health check FAILED — database unreachable");
+    results.push("db: FAILED");
+  }
+  try {
+    await redis.ping();
+    results.push("redis: ok");
+  } catch (err) {
+    logger.error({ err }, "Startup health check FAILED — redis unreachable");
+    results.push("redis: FAILED");
+  }
+  logger.info(`Startup health check — ${results.join(", ")}`);
+})();
 
 initActivityFeed(server);
 
