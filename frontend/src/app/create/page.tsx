@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { getConnectedAddress } from '@/services/wallet';
 import { TxStatusToast } from '@/components/ui/TxStatusToast';
 import type { TxStatus } from '@/types';
+import { TX_PENDING_STATES } from '@/types';
 import { useCreateMarket } from '@/hooks/useCreateMarket';
 
 const ADMIN_ADDRESSES = (process.env.NEXT_PUBLIC_ADMIN_ADDRESSES ?? '')
@@ -174,10 +175,22 @@ export default function CreateMarketPage() {
 
         <button
           type="submit"
-          disabled={['signing', 'broadcasting', 'confirming'].includes(txStatus.status)}
-          className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded font-semibold"
+          disabled={(TX_PENDING_STATES as readonly string[]).includes(txStatus.status)}
+          className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed rounded font-semibold flex items-center justify-center gap-2"
         >
-          {['signing', 'broadcasting', 'confirming'].includes(txStatus.status)
+          {(TX_PENDING_STATES as readonly string[]).includes(txStatus.status) && (
+            <svg
+              className="animate-spin h-4 w-4 text-white"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+          )}
+          {(TX_PENDING_STATES as readonly string[]).includes(txStatus.status)
             ? 'Creating...'
             : 'Create Market'}
         </button>
