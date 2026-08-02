@@ -94,9 +94,9 @@ describe('MarketService', () => {
   });
 
   // 4 ─────────────────────────────────────────────────────────────────────────
-  it('getMarketOdds() returns (0,0,0) for empty pools', async () => {
+  it('getMarketOdds() returns equal implied probabilities (33.33%) for empty pools', async () => {
     const odds = await getMarketOdds('mkt-1'); // pool totals are all '0'
-    expect(odds).toEqual({ odds_a: 0, odds_b: 0, odds_draw: 0 });
+    expect(odds).toEqual({ odds_a: 3333, odds_b: 3333, odds_draw: 3333 });
   });
 
   // 5 ─────────────────────────────────────────────────────────────────────────

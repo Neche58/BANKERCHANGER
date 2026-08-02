@@ -78,6 +78,72 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
 });
 
 // ---------------------------------------------------------------------------
+// POST /auth/refresh
+// ---------------------------------------------------------------------------
+/**
+ * @swagger
+ * /auth/refresh:
+ *   post:
+ *     summary: Exchange a refresh token for a new access token
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: New access token
+ *       401:
+ *         description: Invalid, expired, or revoked refresh token
+ */
+router.post('/refresh', validateBody(refreshBody), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await authService.refreshAccessToken(req.body.refreshToken);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/logout
+// ---------------------------------------------------------------------------
+/**
+ * @swagger
+ * /auth/logout:
+ *   post:
+ *     summary: Revoke a refresh token server-side
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Refresh token revoked
+ */
+router.post('/logout', validateBody(logoutBody), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await authService.logout(req.body.refreshToken);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /auth/forgot-password
 // Stricter rate limit: 5 requests per 15 minutes per IP
 // ---------------------------------------------------------------------------

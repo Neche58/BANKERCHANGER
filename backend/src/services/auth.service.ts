@@ -130,6 +130,41 @@ export async function isSessionRevoked(userId: string, sessionVersion: number): 
   return val !== null;
 }
 
+/**
+ * Refresh tokens are signed JWTs, not stored server-side by default, so an
+ * attacker who obtains one before logout could keep minting access tokens
+ * until it naturally expires. We additionally store a hash of each issued
+ * refresh token in Redis (TTL = remaining token lifetime) and require the
+ * hash to be present before honoring a refresh — logout deletes the hash so
+ * the token can no longer be used even though the JWT itself is still valid.
+ */
+function refreshTokenRedisKey(tokenHash: string): string {
+  return `refresh_token:${tokenHash}`;
+}
+
+async function storeRefreshToken(token: string): Promise<void> {
+  const decoded = jwt.decode(token) as jwt.JwtPayload | null;
+  const exp = decoded?.exp;
+  if (!exp) return;
+
+  const ttl = exp - Math.floor(Date.now() / 1000);
+  if (ttl <= 0) return;
+
+  const tokenHash = await sha256(token);
+  await redis.set(refreshTokenRedisKey(tokenHash), decoded!.sub as string, 'EX', ttl);
+}
+
+async function isRefreshTokenActive(token: string): Promise<boolean> {
+  const tokenHash = await sha256(token);
+  const val = await redis.get(refreshTokenRedisKey(tokenHash));
+  return val !== null;
+}
+
+async function revokeRefreshToken(token: string): Promise<void> {
+  const tokenHash = await sha256(token);
+  await redis.del(refreshTokenRedisKey(tokenHash));
+}
+
 export async function isEmailVerified(userId: string): Promise<boolean> {
   const user = await db.query.users.findFirst({
     where: eq(users.id, userId),
@@ -205,10 +240,54 @@ export async function login(
     return { requires2FA: true, tempToken: signTemp(user.id) };
   }
 
+  const accessToken = signAccess(user.id, user.session_version, user.role === 'admin' ? 'admin' : undefined);
+  const refreshToken = signRefresh(user.id, user.session_version);
+  await storeRefreshToken(refreshToken);
+
+  return { accessToken, refreshToken };
+}
+
+/**
+ * POST /auth/refresh
+ *
+ * Mints a new access token from a refresh token. Rejects tokens that fail
+ * signature/expiry checks, tokens whose session has been revoked (password
+ * reset), and tokens that were revoked server-side via logout.
+ */
+export async function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string }> {
+  const payload = verifyJwt(refreshToken, 'refresh');
+  const userId = payload.sub as string;
+  const sessionVersion: number = payload.sv ?? 0;
+
+  const revoked = await isSessionRevoked(userId, sessionVersion);
+  if (revoked) throw new AppError(401, 'Session has been invalidated');
+
+  const active = await isRefreshTokenActive(refreshToken);
+  if (!active) throw new AppError(401, 'Refresh token has been revoked');
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+  });
+  if (!user) throw new AppError(401, 'Invalid session');
+
   return {
-    accessToken: signAccess(user.id, user.session_version, user.role === 'admin' ? 'admin' : undefined),
-    refreshToken: signRefresh(user.id, user.session_version),
+    accessToken: signAccess(userId, sessionVersion, user.role === 'admin' ? 'admin' : undefined),
   };
+}
+
+/**
+ * POST /auth/logout
+ *
+ * Deletes the server-side record for this refresh token so it can no longer
+ * be used to mint access tokens, even though the JWT itself hasn't expired.
+ */
+export async function logout(refreshToken: string): Promise<void> {
+  try {
+    verifyJwt(refreshToken, 'refresh');
+  } catch {
+    return;
+  }
+  await revokeRefreshToken(refreshToken);
 }
 
 // ---------------------------------------------------------------------------
@@ -407,10 +486,11 @@ export async function verify2FA(
   const secret = decrypt(user.two_factor_secret);
   if (!verifyToken(secret, otp)) throw new AppError(401, 'Invalid or expired OTP');
 
-  return {
-    accessToken: signAccess(userId, user.session_version, user.role === 'admin' ? 'admin' : undefined),
-    refreshToken: signRefresh(userId, user.session_version),
-  };
+  const accessToken = signAccess(userId, user.session_version, user.role === 'admin' ? 'admin' : undefined);
+  const refreshToken = signRefresh(userId, user.session_version);
+  await storeRefreshToken(refreshToken);
+
+  return { accessToken, refreshToken };
 }
 
 

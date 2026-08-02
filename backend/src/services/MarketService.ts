@@ -328,7 +328,12 @@ export async function getMarketOdds(market_id: string): Promise<MarketOdds> {
     total_pool = BigInt(market.total_pool);
   }
 
-  if (total_pool === 0n) return { odds_a: 0, odds_b: 0, odds_draw: 0 };
+  // No bets placed yet — return equal implied probabilities (33.33%) instead
+  // of dividing by zero, which would surface as NaN/Infinity → null in JSON.
+  if (total_pool === 0n) {
+    const EQUAL_PROBABILITY_BPS = Math.round(10000 / 3);
+    return { odds_a: EQUAL_PROBABILITY_BPS, odds_b: EQUAL_PROBABILITY_BPS, odds_draw: EQUAL_PROBABILITY_BPS };
+  }
 
   const fee = (total_pool * BigInt(market.fee_bps)) / 10000n;
   const net_pool = total_pool - fee;
