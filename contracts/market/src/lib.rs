@@ -10,7 +10,7 @@
 mod tests;
 
 use soroban_sdk::{
-    contract, contractimpl, contractclient, token, Address, BytesN, Env, Map, Vec,
+    contract, contractimpl, contractclient, token, Address, BytesN, Env, Map, Symbol, Vec,
 };
 
 use boxmeout_shared::{
@@ -23,7 +23,10 @@ use boxmeout_shared::{
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 const STATE: &str        = "STATE";
-const BETS: &str         = "BETS";
+/// Prefix for the per-bettor bets key: (BET_PREFIX, bettor) -> Vec<BetRecord>.
+/// Keyed per-address so a lookup for one bettor doesn't deserialize every
+/// other bettor's bets (see issue #255).
+const BET_PREFIX: &str   = "BET";
 const BETTOR_LIST: &str  = "BETTOR_LIST";
 const FACTORY: &str      = "FACTORY";
 const CONFIG: &str       = "CONFIG";
@@ -91,17 +94,19 @@ impl Market {
         env.storage().persistent().set(&STATE, state);
     }
 
+    fn bet_key(env: &Env, bettor: &Address) -> (Symbol, Address) {
+        (Symbol::new(env, BET_PREFIX), bettor.clone())
+    }
+
     fn load_bets(env: &Env, bettor: &Address) -> Vec<BetRecord> {
-        let map: Map<Address, Vec<BetRecord>> =
-            env.storage().persistent().get(&BETS).unwrap_or_else(|| Map::new(env));
-        map.get(bettor.clone()).unwrap_or_else(|| Vec::new(env))
+        let key = Self::bet_key(env, bettor);
+        env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env))
     }
 
     fn save_bets(env: &Env, bettor: &Address, bets: &Vec<BetRecord>) {
-        let mut map: Map<Address, Vec<BetRecord>> =
-            env.storage().persistent().get(&BETS).unwrap_or_else(|| Map::new(env));
-        map.set(bettor.clone(), bets.clone());
-        env.storage().persistent().set(&BETS, &map);
+        let key = Self::bet_key(env, bettor);
+        env.storage().persistent().set(&key, bets);
+        env.storage().persistent().extend_ttl(&key, MAX_TTL, MAX_TTL);
     }
 
     fn is_oracle_whitelisted(env: &Env, caller: &Address) -> Result<bool, ContractError> {
@@ -127,7 +132,6 @@ impl Market {
     /// Extend TTL on market data entries to prevent premature expiration.
     fn extend_market_ttl(env: &Env) {
         env.storage().persistent().extend_ttl(&STATE, MAX_TTL, MAX_TTL);
-        env.storage().persistent().extend_ttl(&BETS, MAX_TTL, MAX_TTL);
         env.storage().persistent().extend_ttl(&BETTOR_LIST, MAX_TTL, MAX_TTL);
     }
 }
@@ -176,7 +180,6 @@ impl Market {
         env.storage().persistent().set(&STATE, &state);
         env.storage().persistent().set(&FACTORY, &factory);
         env.storage().persistent().set(&TREASURY, &treasury);
-        env.storage().persistent().set(&BETS, &Map::<Address, Vec<BetRecord>>::new(&env));
         env.storage().persistent().set(&BETTOR_LIST, &Vec::<Address>::new(&env));
         env.storage().instance().set(&PAUSED, &false);
         env.storage().instance().set(&CLAIMING, &false);
@@ -197,6 +200,7 @@ impl Market {
     /// - `InvalidTimeRange`: Betting window has not opened or deadline is invalid
     /// - `BetTooLow`: Bet amount is below minimum
     /// - `BetTooLarge`: Bet amount exceeds maximum
+    /// - `SlippageExceeded`: Computed AMM shares are below `min_shares_out`
     ///
     /// # Security (CEI enforced)
     /// 1. CHECKS: require_auth, pause guard, status, timing, amount bounds
@@ -208,6 +212,7 @@ impl Market {
         side: BetSide,
         amount: i128,
         token: Address,
+        min_shares_out: i128,
     ) -> Result<BetRecord, ContractError> {
         // ── CHECKS ────────────────────────────────────────────────────────────
         bettor.require_auth();                          // auth first
@@ -244,7 +249,7 @@ impl Market {
                 BetSide::FighterB => 1,
                 BetSide::Draw     => 2,
             };
-            if let Some((_shares, impact_bps)) = boxmeout_shared::amm::compute_odds(
+            if let Some((shares_out, impact_bps)) = boxmeout_shared::amm::compute_odds(
                 state.pool_a,
                 state.pool_b,
                 state.pool_draw,
@@ -253,6 +258,9 @@ impl Market {
             ) {
                 if impact_bps > MAX_SLIPPAGE_BPS {
                     return Err(ContractError::BetTooLarge);
+                }
+                if shares_out < min_shares_out {
+                    return Err(ContractError::SlippageExceeded);
                 }
             }
         }
@@ -875,15 +883,11 @@ impl Market {
         let cap: u32 = if limit > 50 { 50 } else { limit };
         let bettor_list: Vec<Address> =
             env.storage().persistent().get(&BETTOR_LIST).unwrap_or_else(|| Vec::new(&env));
-        let bets_map: soroban_sdk::Map<Address, Vec<BetRecord>> =
-            env.storage().persistent().get(&BETS).unwrap_or_else(|| soroban_sdk::Map::new(&env));
 
         let mut all: Vec<BetRecord> = Vec::new(&env);
         for addr in bettor_list.iter() {
-            if let Some(records) = bets_map.get(addr) {
-                for r in records.iter() {
-                    all.push_back(r);
-                }
+            for r in Self::load_bets(&env, &addr).iter() {
+                all.push_back(r);
             }
         }
 
