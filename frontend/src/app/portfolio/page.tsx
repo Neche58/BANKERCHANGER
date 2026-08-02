@@ -134,9 +134,9 @@ export default function PortfolioPage(): JSX.Element {
 
       {/* Stats */}
       <BettorStats
-        totalStaked={portfolio!.total_staked_xlm}
-        totalWon={portfolio!.total_won_xlm}
-        totalLost={portfolio!.total_lost_xlm}
+        totalStaked={portfolio!.total_staked_xlm ?? 0}
+        totalWon={portfolio!.total_won_xlm ?? 0}
+        totalLost={portfolio!.total_lost_xlm ?? 0}
         pendingClaimsCount={pendingCount}
       />
 
