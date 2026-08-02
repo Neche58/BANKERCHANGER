@@ -16,6 +16,14 @@ import { logger } from '../utils/logger';
 
 const env = getEnv();
 const JWT_SECRET = env.JWT_SECRET;
+// Per-token-type secrets — each falls back to JWT_SECRET so deployments that
+// haven't set the new env vars keep working, but configuring them distinctly
+// means a leaked access token secret can't be used to forge refresh, temp-2FA,
+// or password-reset tokens (and vice versa).
+const JWT_ACCESS_SECRET = env.JWT_ACCESS_SECRET || JWT_SECRET;
+const JWT_REFRESH_SECRET = env.JWT_REFRESH_SECRET || JWT_SECRET;
+const JWT_TEMP_SECRET = env.JWT_TEMP_SECRET || JWT_SECRET;
+const JWT_RESET_SECRET = env.JWT_RESET_SECRET || JWT_SECRET;
 const JWT_EXPIRES_IN = env.JWT_EXPIRES_IN || '15m';
 const REFRESH_EXPIRES_IN = env.REFRESH_EXPIRES_IN || '7d';
 const VERIFY_EMAIL_URL = env.VERIFY_EMAIL_URL || 'http://localhost:3001/auth/verify-email';
@@ -55,7 +63,7 @@ async function sendVerificationEmail(email: string, token: string, url: string):
 function signAccess(userId: string, sessionVersion: number, role?: string): string {
   return jwt.sign(
     { sub: userId, type: 'access', sv: sessionVersion, ...(role && { role }) },
-    JWT_SECRET,
+    JWT_ACCESS_SECRET,
     { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions,
   );
 }
@@ -63,27 +71,38 @@ function signAccess(userId: string, sessionVersion: number, role?: string): stri
 function signRefresh(userId: string, sessionVersion: number): string {
   return jwt.sign(
     { sub: userId, type: 'refresh', sv: sessionVersion },
-    JWT_SECRET,
+    JWT_REFRESH_SECRET,
     { expiresIn: REFRESH_EXPIRES_IN } as jwt.SignOptions,
   );
 }
 
 function signTemp(userId: string): string {
-  return jwt.sign({ sub: userId, type: 'temp_2fa' }, JWT_SECRET, {
+  return jwt.sign({ sub: userId, type: 'temp_2fa' }, JWT_TEMP_SECRET, {
     expiresIn: TEMP_TOKEN_EXPIRES_IN,
   } as jwt.SignOptions);
 }
 
 function signReset(userId: string): string {
-  return jwt.sign({ sub: userId, type: 'password_reset' }, JWT_SECRET, {
+  return jwt.sign({ sub: userId, type: 'password_reset' }, JWT_RESET_SECRET, {
     expiresIn: RESET_TOKEN_EXPIRES_IN,
   } as jwt.SignOptions);
+}
+
+/** Returns the signing/verification secret for a given token `type` claim. */
+function secretForType(type: string): string {
+  switch (type) {
+    case 'access': return JWT_ACCESS_SECRET;
+    case 'refresh': return JWT_REFRESH_SECRET;
+    case 'temp_2fa': return JWT_TEMP_SECRET;
+    case 'password_reset': return JWT_RESET_SECRET;
+    default: return JWT_SECRET;
+  }
 }
 
 export function verifyJwt(token: string, expectedType: string): jwt.JwtPayload {
   let payload: jwt.JwtPayload;
   try {
-    payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+    payload = jwt.verify(token, secretForType(expectedType)) as jwt.JwtPayload;
   } catch (err) {
     if (err instanceof jwt.TokenExpiredError) {
       throw new AppError(401, 'Token has expired');

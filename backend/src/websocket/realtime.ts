@@ -7,7 +7,7 @@ import { logger } from '../utils/logger';
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-jwt-secret-change-me';
+const JWT_SECRET = process.env.JWT_ACCESS_SECRET ?? process.env.JWT_SECRET ?? 'dev-jwt-secret-change-me';
 const AUTH_TIMEOUT_MS = 5_000; // 5 seconds to send auth message
 
 // ---------------------------------------------------------------------------
