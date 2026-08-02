@@ -136,6 +136,7 @@ export const disputes = pgTable(
   {
     id: serial('id').primaryKey(),
     market_id: text('market_id').notNull().references(() => markets.market_id),
+    user_id: text('user_id'),
     reason: text('reason').notNull(),
     status: text('status').default('open'),
     admin_notes: text('admin_notes'),
@@ -147,6 +148,7 @@ export const disputes = pgTable(
   (table) => ({
     market_id_idx: index('disputes_market_id_idx').on(table.market_id),
     status_idx: index('disputes_status_idx').on(table.status),
+    user_id_idx: index('disputes_user_id_idx').on(table.user_id),
   }),
 );
 
