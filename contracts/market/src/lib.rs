@@ -568,6 +568,7 @@ impl Market {
             updated_bets.push_back(bet);
         }
         Self::save_bets(&env, &bettor, &updated_bets);
+        Self::extend_market_ttl(&env);
 
         let receipt = ClaimReceipt {
             bettor: bettor.clone(),
@@ -660,6 +661,7 @@ impl Market {
             updated_bets.push_back(bet);
         }
         Self::save_bets(&env, &bettor, &updated_bets);
+        Self::extend_market_ttl(&env);
 
         // ── INTERACTIONS ──────────────────────────────────────────────────────
         let token_client = token::Client::new(&env, &token);
