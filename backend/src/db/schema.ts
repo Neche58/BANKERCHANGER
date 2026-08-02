@@ -136,6 +136,7 @@ export const disputes = pgTable(
   {
     id: serial('id').primaryKey(),
     market_id: text('market_id').notNull().references(() => markets.market_id),
+    user_id: text('user_id'),
     reason: text('reason').notNull(),
     status: text('status').default('open'),
     admin_notes: text('admin_notes'),
@@ -147,6 +148,7 @@ export const disputes = pgTable(
   (table) => ({
     market_id_idx: index('disputes_market_id_idx').on(table.market_id),
     status_idx: index('disputes_status_idx').on(table.status),
+    user_id_idx: index('disputes_user_id_idx').on(table.user_id),
   }),
 );
 
@@ -243,6 +245,31 @@ export const shares = pgTable(
   }),
 );
 
+export const proposals = pgTable(
+  'proposals',
+  {
+    id: serial('id').primaryKey(),
+    proposal_id: text('proposal_id').notNull().unique(),
+    type: text('type').notNull(), // 'fee_rate' | 'add_token' | 'remove_token' | 'max_discount_rate'
+    value: text('value').notNull(), // Stored as string; numeric or address depending on type
+    description: text('description').notNull(),
+    status: text('status').default('active'), // 'active' | 'passed' | 'failed' | 'executed'
+    proposer: text('proposer').notNull(),
+    votes_for: numeric('votes_for').default('0'),
+    votes_against: numeric('votes_against').default('0'),
+    votes_abstain: numeric('votes_abstain').default('0'),
+    created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    expires_at: timestamp('expires_at', { withTimezone: true }).notNull(),
+    executed_at: timestamp('executed_at', { withTimezone: true }),
+    updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    proposal_id_idx: uniqueIndex('proposals_proposal_id_idx').on(table.proposal_id),
+    status_idx: index('proposals_status_idx').on(table.status),
+    created_at_idx: index('proposals_created_at_idx').on(table.created_at),
+  }),
+);
+
 export type Market = typeof markets.$inferSelect;
 export type NewMarket = typeof markets.$inferInsert;
 export type Bet = typeof bets.$inferSelect;
@@ -260,3 +287,5 @@ export type Distribution = typeof distributions.$inferSelect;
 export type NewDistribution = typeof distributions.$inferInsert;
 export type Share = typeof shares.$inferSelect;
 export type NewShare = typeof shares.$inferInsert;
+export type Proposal = typeof proposals.$inferSelect;
+export type NewProposal = typeof proposals.$inferInsert;

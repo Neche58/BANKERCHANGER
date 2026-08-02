@@ -6,6 +6,7 @@ import { useState, useCallback } from 'react';
 import type { TxStatus } from '../types';
 import { submitClaimWithStages } from '../services/wallet';
 import { useAppStore } from '../store';
+import { queryClient } from '../providers/QueryProvider';
 
 export interface UseClaimWinningsResult {
   claimWinnings: (marketId: string) => Promise<void>;
@@ -47,8 +48,11 @@ export function useClaimWinnings(): UseClaimWinningsResult {
       setTxHash(hash);
       update({ hash, status: 'success', error: null });
 
-      // Invalidate caches so useBets and useMarket refetch fresh data
-      // Both hooks use useEffect with no external cache — trigger by dispatching a custom event
+      // Invalidate relevant query caches so data refetches fresh from the server
+      await queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      await queryClient.invalidateQueries({ queryKey: ['market', marketId] });
+
+      // Also dispatch custom event for hooks that use custom state management
       window.dispatchEvent(new CustomEvent('bankerchanger:claim_success', { detail: { marketId } }));
     } catch (e: any) {
       const msg = e?.message ?? 'Claim failed';

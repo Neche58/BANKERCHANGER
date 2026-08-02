@@ -1,16 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import jwt from 'jsonwebtoken';
 import * as authService from '../services/auth.service';
 import { AppError } from '../utils/AppError';
 import { validateBody } from '../api/middleware/validate';
 import { rateLimit } from '../middleware/rate-limit.middleware';
-import { getEnv } from '../config/env';
+import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
-
-const env = getEnv();
-const JWT_ACCESS_SECRET = env.JWT_ACCESS_SECRET || env.JWT_SECRET;
 
 /**
  * @swagger
@@ -18,38 +14,6 @@ const JWT_ACCESS_SECRET = env.JWT_ACCESS_SECRET || env.JWT_SECRET;
  *   name: Auth
  *   description: Authentication and 2FA
  */
-
-// ---------------------------------------------------------------------------
-// Auth middleware — verifies JWT and checks session-revocation tombstone
-// ---------------------------------------------------------------------------
-async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      throw new AppError(401, 'Missing or invalid Authorization header');
-    }
-
-    const token = authHeader.slice(7);
-    const payload = jwt.verify(token, JWT_ACCESS_SECRET) as jwt.JwtPayload;
-
-    if (payload.type !== 'access') {
-      throw new AppError(401, 'Invalid token type');
-    }
-
-    const userId = payload.sub as string;
-    const sessionVersion: number = payload.sv ?? 0;
-
-    // Check Redis tombstone — set on password reset
-    const revoked = await authService.isSessionRevoked(userId, sessionVersion);
-    if (revoked) throw new AppError(401, 'Session has been invalidated');
-
-    (req as unknown as Record<string, unknown>).userId = userId;
-    (req as unknown as Record<string, unknown>).sessionVersion = sessionVersion;
-    next();
-  } catch (err) {
-    next(err instanceof AppError ? err : new AppError(401, 'Invalid or expired token'));
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Zod schemas for request validation
@@ -108,6 +72,72 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
     if (!email || !password) throw new AppError(400, 'Email and password required');
     const result = await authService.login(email, password);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/refresh
+// ---------------------------------------------------------------------------
+/**
+ * @swagger
+ * /auth/refresh:
+ *   post:
+ *     summary: Exchange a refresh token for a new access token
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: New access token
+ *       401:
+ *         description: Invalid, expired, or revoked refresh token
+ */
+router.post('/refresh', validateBody(refreshBody), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await authService.refreshAccessToken(req.body.refreshToken);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/logout
+// ---------------------------------------------------------------------------
+/**
+ * @swagger
+ * /auth/logout:
+ *   post:
+ *     summary: Revoke a refresh token server-side
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Refresh token revoked
+ */
+router.post('/logout', validateBody(logoutBody), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await authService.logout(req.body.refreshToken);
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }

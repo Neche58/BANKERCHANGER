@@ -251,6 +251,8 @@ export async function fetchExternalFightResult(match_id: string): Promise<FightO
 
   try {
     const url = `${baseUrl}/fights?fight_id=${encodeURIComponent(match_id)}`;
+    // AbortSignal.timeout bounds this call so a hanging upstream API can't
+    // hold the auto-resolution cron open indefinitely for this market.
     const response = await fetch(url, {
       headers: {
         Accept: 'application/json',

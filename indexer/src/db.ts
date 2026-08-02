@@ -5,7 +5,10 @@ import fs from 'fs/promises';
 const dbPath = path.join(__dirname, '../data');
 const cursorFilePath = path.join(dbPath, 'cursor.json');
 
-// Initialize database directory asynchronously
+// Lazy database instance - only created when first accessed
+let dbInstance: Database.Database | null = null;
+
+/** Initialize database directory asynchronously */
 async function initializeDataDir() {
   try {
     await fs.mkdir(dbPath, { recursive: true });
@@ -15,28 +18,53 @@ async function initializeDataDir() {
   }
 }
 
-// Initialize data directory on module load
-initializeDataDir().catch(err => {
-  console.error('Critical error initializing data directory:', err);
-  process.exit(1);
+/**
+ * Get or initialize the database instance (lazy singleton).
+ * In test environments, this allows mocking/resetting the database.
+ * In production, creates a single connection pool.
+ *
+ * To reset the database in tests: call `db.exec('DELETE FROM ...')` or
+ * set `process.env.DATABASE_INSTANCE = null` to force re-initialization.
+ */
+function getDb(): Database.Database {
+  if (dbInstance) return dbInstance;
+
+  // Synchronously initialize data directory (blocks, but only on first access)
+  const fs_sync = require('fs');
+  fs_sync.mkdirSync(dbPath, { recursive: true });
+
+  dbInstance = new Database(path.join(dbPath, 'indexer.db'));
+
+  // Enable WAL mode for better performance
+  dbInstance.pragma('journal_mode = WAL');
+
+  // Initialize tables
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS invoices (
+      id TEXT PRIMARY KEY,
+      freelancer TEXT,
+      payer TEXT,
+      amount INTEGER,
+      due_date TEXT,
+      status TEXT NOT NULL
+    );
+  `);
+
+  return dbInstance;
+}
+
+export function getDatabase(): Database.Database {
+  return getDb();
+}
+
+// For backward compatibility with existing code that uses `db` directly
+// (e.g., `db.prepare(...).run(...)`) — this accesses the lazy instance
+export const db = new Proxy({} as Database.Database, {
+  get(target, prop) {
+    const instance = getDb();
+    return (instance as any)[prop];
+  },
 });
-
-export const db = new Database(path.join(dbPath, 'indexer.db'));
-
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL');
-
-// Initialize tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS invoices (
-    id TEXT PRIMARY KEY,
-    freelancer TEXT,
-    payer TEXT,
-    amount INTEGER,
-    due_date TEXT,
-    status TEXT NOT NULL
-  );
-`);
 
 // Async cursor persistence using file system
 export async function getCursor(): Promise<string | null> {
