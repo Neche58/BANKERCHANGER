@@ -18,6 +18,7 @@ import { pool } from "./config/db";
 import { redis } from "./config/redis";
 import authRouter from "./routes/auth.routes";
 import marketRouter from "./routes/market.routes";
+import governanceRouter from "./routes/governance.routes";
 import adminRouter from "./routes/admin.routes";
 import { getPortfolio, getPlatformStats } from "./api/controllers/MarketController";
 import claimsRouter from "./routes/bet.routes";
@@ -96,6 +97,7 @@ app.use(
 
 app.use("/auth", authRouter);
 app.use("/api/markets", marketRouter);
+app.use("/api/governance", governanceRouter);
 app.use("/api/claims", claimsRouter);
 app.get("/api/stats", getPlatformStats);
 app.get("/api/portfolio/:address", getPortfolio);
