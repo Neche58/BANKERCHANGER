@@ -5,7 +5,7 @@
 
 import { useCallback, useState } from 'react';
 import type { BetSide, TxStatus } from '../types';
-import { submitBet } from '../services/wallet';
+import { submitBetWithStages } from '../services/wallet';
 import { useAppStore } from '../store';
 
 export interface UsePlaceBetResult {
@@ -32,12 +32,16 @@ export function usePlaceBet(): UsePlaceBetResult {
       setTxStatus({ hash: null, status: 'signing', error: null });
 
       try {
-        // Sign and broadcast transaction
-        setTxStatus({ hash: null, status: 'broadcasting', error: null });
-        const hash = await submitBet(market_id, side, amount_xlm);
-
-        // Confirm transaction
-        setTxStatus({ hash, status: 'confirming', error: null });
+        // Use callback to track state transitions: signing → broadcasting → confirming
+        const hash = await submitBetWithStages(market_id, side, amount_xlm, (stage) => {
+          if (stage === 'signing') {
+            setTxStatus({ hash: null, status: 'signing', error: null });
+          } else if (stage === 'broadcasting') {
+            setTxStatus({ hash: null, status: 'broadcasting', error: null });
+          } else if (stage === 'confirming') {
+            setTxStatus({ hash, status: 'confirming', error: null });
+          }
+        });
 
         // Success
         setTxStatus({ hash, status: 'success', error: null });

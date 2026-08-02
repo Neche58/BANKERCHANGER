@@ -82,6 +82,9 @@ export async function getBettorStats(
     const stats = await MarketService.getBettorStats(bettor_address);
     res.status(200).json(stats);
   } catch (err) {
+    if (err instanceof AppError && err.statusCode === 400) {
+      return next(err);
+    }
     next(err);
   }
 }
@@ -90,6 +93,7 @@ export async function getBettorStats(
  * GET /api/bets/:bettor_address
  *
  * Returns paginated bets placed by a given Stellar address.
+ * Validates the Stellar address format and returns 400 Bad Request if invalid.
  */
 export async function getBetsByAddress(
   req: Request,
@@ -101,7 +105,20 @@ export async function getBetsByAddress(
     let page = parseInt(req.query.page as string, 10) || 1;
     let limit = parseInt(req.query.limit as string, 10) || 50;
 
-    if (!StrKey.isValidEd25519PublicKey(bettor_address)) {
+    // Validate Stellar address format early and return 400 (not 500) for invalid addresses
+    try {
+      if (!StrKey.isValidEd25519PublicKey(bettor_address)) {
+        throw AppError.badRequest(
+          'Invalid Stellar address format',
+          ERROR_CODES.INVALID_REQUEST
+        );
+      }
+    } catch (validationErr) {
+      // If validation error is already an AppError, rethrow it
+      if (validationErr instanceof AppError) {
+        throw validationErr;
+      }
+      // Otherwise wrap any validation exception as a 400 Bad Request
       throw AppError.badRequest(
         'Invalid Stellar address format',
         ERROR_CODES.INVALID_REQUEST
@@ -121,6 +138,9 @@ export async function getBetsByAddress(
       limit,
     });
   } catch (err) {
+    if (err instanceof AppError && err.statusCode === 400) {
+      return next(err);
+    }
     next(err);
   }
 }
