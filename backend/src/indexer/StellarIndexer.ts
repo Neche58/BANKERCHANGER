@@ -479,26 +479,35 @@ export async function handleMarketResolved(event: RawStellarEvent): Promise<void
   try {
     await client.query('BEGIN');
 
-    // Update market status, winning_outcome, and resolved_at
+    const outcome = typeof p.outcome === 'string' ? p.outcome : null;
+    const marketId = typeof p.market_id === 'string' ? p.market_id : null;
+    const matchId = typeof p.match_id === 'string' ? p.match_id : null;
+    const oracleAddress = typeof p.oracle_address === 'string' ? p.oracle_address : null;
+    const signature = typeof p.signature === 'string' ? p.signature : null;
+    const resolvedAt = event.ledger_close_time ?? new Date().toISOString();
+
+    if (!marketId) {
+      throw new Error('Missing market_id in MarketResolved event');
+    }
+
     await client.query(
       `UPDATE markets
           SET status = 'resolved', outcome = $1, resolved_at = $2, oracle_used = $3, updated_at = NOW()
         WHERE market_id = $4`,
-      [p.outcome, event.ledger_close_time, p.oracle_address ?? null, p.market_id],
+      [outcome, resolvedAt, oracleAddress ?? null, marketId],
     );
 
-    // Insert OracleReport record
     await client.query(
       `INSERT INTO oracle_reports
          (match_id, oracle_address, outcome, reported_at, signature, accepted, tx_hash)
        VALUES ($1, $2, $3, $4, $5, TRUE, $6)
        ON CONFLICT DO NOTHING`,
       [
-        p.match_id ?? '',
-        p.oracle_address ?? '',
-        p.outcome ?? '',
-        event.ledger_close_time,
-        p.signature ?? '',
+        matchId ?? '',
+        oracleAddress ?? '',
+        outcome ?? '',
+        resolvedAt,
+        signature ?? '',
         event.tx_hash,
       ],
     );
@@ -506,7 +515,7 @@ export async function handleMarketResolved(event: RawStellarEvent): Promise<void
     // Get all unique bettors for this market
     const { rows: bettors } = await client.query(
       `SELECT DISTINCT bettor_address FROM bets WHERE market_id = $1`,
-      [p.market_id]
+      [marketId]
     );
 
     // Enqueue notification job for each bettor
@@ -514,7 +523,7 @@ export async function handleMarketResolved(event: RawStellarEvent): Promise<void
       await client.query(
         `INSERT INTO notification_jobs (bettor_address, market_id, job_type, status, created_at)
          VALUES ($1, $2, $3, $4, NOW())`,
-        [bettor.bettor_address, p.market_id, 'market_resolved', 'pending']
+        [bettor.bettor_address, marketId, 'market_resolved', 'pending']
       );
     }
 
@@ -527,7 +536,7 @@ export async function handleMarketResolved(event: RawStellarEvent): Promise<void
   }
 
   // Invalidate all Redis cache keys for this market
-  await cacheDeletePattern(`market:${p.market_id}*`);
+  await cacheDeletePattern(`market:${marketId}*`);
   await cacheDeletePattern(`markets:*`);
 }
 

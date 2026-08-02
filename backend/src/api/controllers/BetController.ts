@@ -82,6 +82,9 @@ export async function getBettorStats(
     const stats = await MarketService.getBettorStats(bettor_address);
     res.status(200).json(stats);
   } catch (err) {
+    if (err instanceof AppError && err.statusCode === 400) {
+      return next(err);
+    }
     next(err);
   }
 }
@@ -135,6 +138,9 @@ export async function getBetsByAddress(
       limit,
     });
   } catch (err) {
+    if (err instanceof AppError && err.statusCode === 400) {
+      return next(err);
+    }
     next(err);
   }
 }
