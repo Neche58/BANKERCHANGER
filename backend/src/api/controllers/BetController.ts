@@ -102,8 +102,8 @@ export async function getBetsByAddress(
 ): Promise<void> {
   try {
     const { bettor_address } = req.params;
-    let page = parseInt(req.query.page as string, 10) || 1;
-    let limit = parseInt(req.query.limit as string, 10) || 50;
+    const page = req.query.page !== undefined ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit !== undefined ? parseInt(req.query.limit as string, 10) : 50;
 
     // Validate Stellar address format early and return 400 (not 500) for invalid addresses
     try {
@@ -124,11 +124,6 @@ export async function getBetsByAddress(
         ERROR_CODES.INVALID_REQUEST
       );
     }
-
-    // Validate pagination params
-    if (page < 1) page = 1;
-    if (limit < 1) limit = 50;
-    if (limit > 200) limit = 200;
 
     const result = await BetService.fetchBetsByAddress(bettor_address, page, limit);
     res.status(200).json({

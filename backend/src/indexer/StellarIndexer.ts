@@ -37,7 +37,11 @@ export async function startIndexer(): Promise<void> {
 
   console.log(`[Indexer] Starting from ledger ${lastProcessed}`);
 
-  // Load checkpoint and backfill if needed
+  // Load checkpoint and backfill if needed.
+  // This backfill is awaited to completion before the real-time subscription
+  // below is started, so the two never process the same ledger concurrently;
+  // any residual overlap is additionally covered by the ON CONFLICT upserts
+  // in processLedger/handleBetPlaced, which make re-processing idempotent.
   const checkpoint = await loadCheckpoint();
   if (checkpoint && checkpoint > lastProcessed) {
     console.log(`[Indexer] Backfilling from ledger ${lastProcessed + 1} to ${checkpoint}`);
