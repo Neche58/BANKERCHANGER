@@ -37,7 +37,11 @@ export async function startIndexer(): Promise<void> {
 
   console.log(`[Indexer] Starting from ledger ${lastProcessed}`);
 
-  // Load checkpoint and backfill if needed
+  // Load checkpoint and backfill if needed.
+  // This backfill is awaited to completion before the real-time subscription
+  // below is started, so the two never process the same ledger concurrently;
+  // any residual overlap is additionally covered by the ON CONFLICT upserts
+  // in processLedger/handleBetPlaced, which make re-processing idempotent.
   const checkpoint = await loadCheckpoint();
   if (checkpoint && checkpoint > lastProcessed) {
     console.log(`[Indexer] Backfilling from ledger ${lastProcessed + 1} to ${checkpoint}`);
@@ -45,9 +49,11 @@ export async function startIndexer(): Promise<void> {
     lastProcessed = checkpoint;
   }
 
-  // Subscribe to real-time events
+  // Subscribe to real-time events from both FACTORY_CONTRACT and TREASURY_CONTRACT
   console.log(`[Indexer] Starting real-time subscription from ledger ${lastProcessed}`);
-  const unsubscribe = subscribeToContractEvents(FACTORY_CONTRACT, async (event: unknown) => {
+  console.log(`[Indexer] Subscribing to contracts: factory=${FACTORY_CONTRACT}, treasury=${TREASURY_CONTRACT || 'not configured'}`);
+  
+  const handleRealTimeEvent = async (event: unknown) => {
     try {
       const eventData = event as Record<string, unknown>;
       const rawEvent: RawStellarEvent = {
@@ -63,18 +69,29 @@ export async function startIndexer(): Promise<void> {
     } catch (err) {
       console.error('[Indexer] Error processing real-time event:', err);
     }
-  });
+  };
+
+  // Subscribe to FACTORY_CONTRACT events
+  const unsubscribeFactory = subscribeToContractEvents(FACTORY_CONTRACT, handleRealTimeEvent);
+
+  // Subscribe to TREASURY_CONTRACT events (if configured)
+  let unsubscribeTreasury = () => {};
+  if (TREASURY_CONTRACT) {
+    unsubscribeTreasury = subscribeToContractEvents(TREASURY_CONTRACT, handleRealTimeEvent);
+  }
 
   // Handle graceful shutdown
   process.on('SIGTERM', () => {
     console.log('[Indexer] SIGTERM received, shutting down gracefully');
-    unsubscribe();
+    unsubscribeFactory();
+    unsubscribeTreasury();
     process.exit(0);
   });
 
   process.on('SIGINT', () => {
     console.log('[Indexer] SIGINT received, shutting down gracefully');
-    unsubscribe();
+    unsubscribeFactory();
+    unsubscribeTreasury();
     process.exit(0);
   });
 
@@ -255,7 +272,7 @@ export async function processLedger(ledger_sequence: number): Promise<void> {
       filters: [
         {
           type: 'contract',
-          contractIds: [FACTORY_CONTRACT, TREASURY_CONTRACT],
+          contractIds: [FACTORY_CONTRACT, TREASURY_CONTRACT].filter(id => id),
           topics: [['*']]
         }
       ],
@@ -466,26 +483,35 @@ export async function handleMarketResolved(event: RawStellarEvent): Promise<void
   try {
     await client.query('BEGIN');
 
-    // Update market status, winning_outcome, and resolved_at
+    const outcome = typeof p.outcome === 'string' ? p.outcome : null;
+    const marketId = typeof p.market_id === 'string' ? p.market_id : null;
+    const matchId = typeof p.match_id === 'string' ? p.match_id : null;
+    const oracleAddress = typeof p.oracle_address === 'string' ? p.oracle_address : null;
+    const signature = typeof p.signature === 'string' ? p.signature : null;
+    const resolvedAt = event.ledger_close_time ?? new Date().toISOString();
+
+    if (!marketId) {
+      throw new Error('Missing market_id in MarketResolved event');
+    }
+
     await client.query(
       `UPDATE markets
           SET status = 'resolved', outcome = $1, resolved_at = $2, oracle_used = $3, updated_at = NOW()
         WHERE market_id = $4`,
-      [p.outcome, event.ledger_close_time, p.oracle_address ?? null, p.market_id],
+      [outcome, resolvedAt, oracleAddress ?? null, marketId],
     );
 
-    // Insert OracleReport record
     await client.query(
       `INSERT INTO oracle_reports
          (match_id, oracle_address, outcome, reported_at, signature, accepted, tx_hash)
        VALUES ($1, $2, $3, $4, $5, TRUE, $6)
        ON CONFLICT DO NOTHING`,
       [
-        p.match_id ?? '',
-        p.oracle_address ?? '',
-        p.outcome ?? '',
-        event.ledger_close_time,
-        p.signature ?? '',
+        matchId ?? '',
+        oracleAddress ?? '',
+        outcome ?? '',
+        resolvedAt,
+        signature ?? '',
         event.tx_hash,
       ],
     );
@@ -493,7 +519,7 @@ export async function handleMarketResolved(event: RawStellarEvent): Promise<void
     // Get all unique bettors for this market
     const { rows: bettors } = await client.query(
       `SELECT DISTINCT bettor_address FROM bets WHERE market_id = $1`,
-      [p.market_id]
+      [marketId]
     );
 
     // Enqueue notification job for each bettor
@@ -501,7 +527,7 @@ export async function handleMarketResolved(event: RawStellarEvent): Promise<void
       await client.query(
         `INSERT INTO notification_jobs (bettor_address, market_id, job_type, status, created_at)
          VALUES ($1, $2, $3, $4, NOW())`,
-        [bettor.bettor_address, p.market_id, 'market_resolved', 'pending']
+        [bettor.bettor_address, marketId, 'market_resolved', 'pending']
       );
     }
 
@@ -514,7 +540,7 @@ export async function handleMarketResolved(event: RawStellarEvent): Promise<void
   }
 
   // Invalidate all Redis cache keys for this market
-  await cacheDeletePattern(`market:${p.market_id}*`);
+  await cacheDeletePattern(`market:${marketId}*`);
   await cacheDeletePattern(`markets:*`);
 }
 

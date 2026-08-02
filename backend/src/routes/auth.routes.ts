@@ -1,17 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import jwt from 'jsonwebtoken';
 import * as authService from '../services/auth.service';
 import { AppError } from '../utils/AppError';
 import { validateBody } from '../api/middleware/validate';
 import { rateLimit } from '../middleware/rate-limit.middleware';
-import { getEnv } from '../config/env';
-import { refreshBody, logoutBody } from '../schemas/validation.schemas';
+import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
-
-const env = getEnv();
-const JWT_SECRET = env.JWT_SECRET;
 
 /**
  * @swagger
@@ -19,38 +14,6 @@ const JWT_SECRET = env.JWT_SECRET;
  *   name: Auth
  *   description: Authentication and 2FA
  */
-
-// ---------------------------------------------------------------------------
-// Auth middleware — verifies JWT and checks session-revocation tombstone
-// ---------------------------------------------------------------------------
-async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      throw new AppError(401, 'Missing or invalid Authorization header');
-    }
-
-    const token = authHeader.slice(7);
-    const payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
-
-    if (payload.type !== 'access') {
-      throw new AppError(401, 'Invalid token type');
-    }
-
-    const userId = payload.sub as string;
-    const sessionVersion: number = payload.sv ?? 0;
-
-    // Check Redis tombstone — set on password reset
-    const revoked = await authService.isSessionRevoked(userId, sessionVersion);
-    if (revoked) throw new AppError(401, 'Session has been invalidated');
-
-    (req as unknown as Record<string, unknown>).userId = userId;
-    (req as unknown as Record<string, unknown>).sessionVersion = sessionVersion;
-    next();
-  } catch (err) {
-    next(err instanceof AppError ? err : new AppError(401, 'Invalid or expired token'));
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Zod schemas for request validation

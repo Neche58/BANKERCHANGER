@@ -2,22 +2,86 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { getInvoices, getInvoiceById } from './db';
 import { getPollerHealth } from './poller';
+import { isLive, isReady, getReadinessDetails } from './health';
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+/**
+ * Liveness probe: Is the process alive?
+ * Returns 200 if process is running, 503 otherwise.
+ * Used by Kubernetes to restart dead containers.
+ */
+app.get('/healthz/live', (req: Request, res: Response) => {
+  try {
+    const live = isLive();
+    const statusCode = live ? 200 : 503;
+    
+    res.status(statusCode).json({
+      status: live ? 'alive' : 'dead',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ 
+      status: 'error',
+      error: err.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+/**
+ * Readiness probe: Is the service ready to handle traffic?
+ * Returns 200 if all dependencies healthy, 503 if not.
+ * Checks:
+ *  - Database connectivity
+ *  - RPC connectivity
+ *  - Cursor has advanced (recent activity)
+ * Used by Kubernetes to add/remove from load balancer.
+ */
+app.get('/healthz/ready', (req: Request, res: Response) => {
+  try {
+    const ready = isReady();
+    const details = getReadinessDetails();
+    const statusCode = ready ? 200 : 503;
+    
+    res.status(statusCode).json({
+      status: ready ? 'ready' : 'not_ready',
+      ready,
+      lastLedger: details.lastLedger,
+      cursorAge: details.cursorAge,
+      maxCursorAge: details.maxCursorAge,
+      reasons: details.reasons,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(503).json({ 
+      status: 'error',
+      ready: false,
+      error: err.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+/**
+ * Legacy unified health endpoint (for backwards compatibility)
+ * Returns detailed poller health information.
+ */
 app.get('/health', (req: Request, res: Response) => {
   try {
     const health = getPollerHealth();
+    const ready = isReady();
     
-    // Return 200 if poller is running, 503 if not
-    const statusCode = health.isRunning ? 200 : 503;
+    // Return 200 if poller is running and ready, 503 if not
+    const statusCode = (health.isRunning && ready) ? 200 : 503;
     
     res.status(statusCode).json({
       success: statusCode === 200,
-      status: health.isRunning ? 'healthy' : 'unhealthy',
+      status: (health.isRunning && ready) ? 'healthy' : 'unhealthy',
+      ready,
       poller: {
         isRunning: health.isRunning,
         consecutiveFailures: health.consecutiveFailures,

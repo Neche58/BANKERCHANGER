@@ -1,3 +1,4 @@
+import * as MarketServiceModule from '../../src/services/MarketService';
 import { setDbAdapter, getMarkets, getMarketById, getMarketOdds, getPortfolioByAddress, getBetsByMarket, simulateProjectedPayout } from '../../src/services/MarketService';
 import { AppError } from '../../src/utils/AppError';
 import type { Market } from '../../src/models/Market';

@@ -9,7 +9,7 @@ import { AppError } from '../../utils/AppError';
 import * as StellarService from '../../services/StellarService';
 import * as BetService from '../../services/BetService';
 import * as OracleService from '../../oracle/OracleService';
-import { db, bulkPauseMarkets, bulkCancelMarkets } from '../../services/MarketService';
+import { db, bulkPauseMarkets, bulkCancelMarkets, updateMarketStatus } from '../../services/MarketService';
 import { pool } from '../../config/db';
 
 const MAX_BULK = 50;
@@ -104,7 +104,7 @@ export async function flagDispute(
     [market_id, reason],
   );
 
-  await db().updateMarketStatus(market_id, 'disputed');
+  await updateMarketStatus(market_id, 'disputed');
 
   res.status(201).json({
     tx_hash: txHash,
@@ -303,7 +303,7 @@ export async function cancelMarket(
     [nativeToScVal(adminAddress), nativeToScVal(reason)],
   );
 
-  await db().updateMarketStatus(market_id, 'cancelled');
+  await updateMarketStatus(market_id, 'cancelled');
 
   res.json({ tx_hash: txHash });
 }

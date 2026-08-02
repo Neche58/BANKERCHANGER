@@ -22,11 +22,16 @@ export async function generateQRCode(otpauthUrl: string): Promise<string> {
  *
  * @param secret  Base32-encoded TOTP secret
  * @param token   The 6-digit code to verify
- * @param window  Allowed time-step deviation (default 1 = ±1 step = 90 s window).
- *                Narrower windows are more secure; increase only to tolerate
- *                clock skew on the client device.
+ * @param window  Allowed time-step deviation (default 0 = current step only =
+ *                30 s window).  A wider window tolerates clock skew but
+ *                increases the replay window, which is undesirable for a
+ *                financial platform.  Only increase when clients are known
+ *                to have unreliable clocks.
+ *
+ * The default is overridable via the TOTP_WINDOW environment variable.
  */
-export function verifyToken(secret: string, token: string, window: number = 1): boolean {
+export function verifyToken(secret: string, token: string, window?: number): boolean {
+  const effectiveWindow = window ?? parseInt(process.env.TOTP_WINDOW ?? '0', 10);
   const totp = new OTPAuth.TOTP({
     algorithm: 'SHA1',
     digits: 6,
@@ -34,5 +39,5 @@ export function verifyToken(secret: string, token: string, window: number = 1): 
     secret: OTPAuth.Secret.fromBase32(secret),
   });
   // delta null means invalid
-  return totp.validate({ token, window }) !== null;
+  return totp.validate({ token, window: effectiveWindow }) !== null;
 }
