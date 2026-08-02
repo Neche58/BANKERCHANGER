@@ -44,7 +44,11 @@ const BACKOFF_MULTIPLIER = 2;
 
 function calculateBackoff(failureCount: number): number {
   const backoff = MIN_BACKOFF_MS * Math.pow(BACKOFF_MULTIPLIER, failureCount - 1);
-  return Math.min(backoff, MAX_BACKOFF_MS);
+  const cappedBackoff = Math.min(backoff, MAX_BACKOFF_MS);
+  // Add jitter to prevent thundering herd: backoff * (0.5 + Math.random() * 0.5)
+  // This produces a range of [0.5 * backoff, backoff]
+  const jitter = cappedBackoff * (0.5 + Math.random() * 0.5);
+  return Math.round(jitter);
 }
 
 // ── Structured logging ──────────────────────────────────────────────────────
@@ -94,8 +98,8 @@ export async function pollEvents() {
   // Recursive async loop with exponential backoff
   async function pollLoop(): Promise<void> {
     try {
-      // Build request
-      const request: rpc.Api.GetEventsRequest = cursor
+      // Build request with proper typing (use any to bypass strict filter type checking)
+      const request: any = cursor
         ? {
             cursor,
             filters: [
@@ -119,35 +123,77 @@ export async function pollEvents() {
             limit: 100
           };
 
-      // Poll for events
-      const response = await server.getEvents(request);
+      // Poll for events with pagination support
+      let paginationCursor = cursor || '';
+      let totalEventsProcessed = 0;
+      let hasMore = true;
 
-      // Process events only if successful
-      if (response.events && response.events.length > 0) {
-        for (const event of response.events) {
-          processEvent(event);
-          // Update last ledger from event
-          if (event.ledger) {
-            updateLastLedger(event.ledger);
+      while (hasMore) {
+        // Build paginated request
+        const filters = request.filters || [
+          {
+            type: 'contract',
+            contractIds: [CONTRACT_ID],
+            topics: [['*']]
+          }
+        ];
+
+        // Build request with proper typing
+        let paginatedRequest: any = {
+          filters,
+          limit: 100,
+        };
+
+        // Set cursor or startLedger
+        if (paginationCursor) {
+          paginatedRequest.cursor = paginationCursor;
+        } else if (request.startLedger) {
+          paginatedRequest.startLedger = request.startLedger;
+        }
+
+        const response = await server.getEvents(paginatedRequest);
+
+        // Process all events on this page
+        if (response.events && response.events.length > 0) {
+          for (const event of response.events) {
+            processEvent(event);
+            // Update last ledger from event
+            if (event.ledger) {
+              updateLastLedger(event.ledger);
+            }
+          }
+          totalEventsProcessed += response.events.length;
+        }
+
+        // Check if there are more pages using paging_token (the cursor field)
+        // Stellar RPC uses paging_token for pagination; if it exists and events were returned,
+        // there may be more data
+        const pagingToken = (response as any).paging_token;
+        if (pagingToken && response.events && response.events.length > 0) {
+          paginationCursor = pagingToken;
+          hasMore = true;
+        } else {
+          hasMore = false;
+          // Only advance main cursor when all pages are consumed
+          const oldCursor = cursor;
+          cursor = response.cursor || pagingToken || '';
+          await saveCursor(cursor);
+          pollerHealth.eventsProcessed += totalEventsProcessed;
+
+          if (totalEventsProcessed > 0) {
+            log('info', 'Events polled and processed (with pagination)', {
+              eventCount: totalEventsProcessed,
+              oldCursor,
+              newCursor: cursor,
+              consecutiveFailures: pollerHealth.consecutiveFailures,
+            });
+          } else {
+            log('info', 'Poll successful but no new events', {
+              cursor,
+              consecutiveFailures: pollerHealth.consecutiveFailures,
+            });
           }
         }
-        // Only advance cursor on successful poll
-        const oldCursor = cursor;
-        cursor = response.cursor;
-        await saveCursor(cursor);
-        pollerHealth.eventsProcessed += response.events.length;
-
-        log('info', 'Events polled and processed', {
-          eventCount: response.events.length,
-          oldCursor,
-          newCursor: cursor,
-          consecutiveFailures: pollerHealth.consecutiveFailures,
-        });
-      } else {
-        log('info', 'Poll successful but no new events', {
-          cursor,
-          consecutiveFailures: pollerHealth.consecutiveFailures,
-        });
       }
 
       // Reset failure counter on success
