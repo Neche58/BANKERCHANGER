@@ -45,9 +45,11 @@ export async function startIndexer(): Promise<void> {
     lastProcessed = checkpoint;
   }
 
-  // Subscribe to real-time events
+  // Subscribe to real-time events from both FACTORY_CONTRACT and TREASURY_CONTRACT
   console.log(`[Indexer] Starting real-time subscription from ledger ${lastProcessed}`);
-  const unsubscribe = subscribeToContractEvents(FACTORY_CONTRACT, async (event: unknown) => {
+  console.log(`[Indexer] Subscribing to contracts: factory=${FACTORY_CONTRACT}, treasury=${TREASURY_CONTRACT || 'not configured'}`);
+  
+  const handleRealTimeEvent = async (event: unknown) => {
     try {
       const eventData = event as Record<string, unknown>;
       const rawEvent: RawStellarEvent = {
@@ -63,18 +65,29 @@ export async function startIndexer(): Promise<void> {
     } catch (err) {
       console.error('[Indexer] Error processing real-time event:', err);
     }
-  });
+  };
+
+  // Subscribe to FACTORY_CONTRACT events
+  const unsubscribeFactory = subscribeToContractEvents(FACTORY_CONTRACT, handleRealTimeEvent);
+
+  // Subscribe to TREASURY_CONTRACT events (if configured)
+  let unsubscribeTreasury = () => {};
+  if (TREASURY_CONTRACT) {
+    unsubscribeTreasury = subscribeToContractEvents(TREASURY_CONTRACT, handleRealTimeEvent);
+  }
 
   // Handle graceful shutdown
   process.on('SIGTERM', () => {
     console.log('[Indexer] SIGTERM received, shutting down gracefully');
-    unsubscribe();
+    unsubscribeFactory();
+    unsubscribeTreasury();
     process.exit(0);
   });
 
   process.on('SIGINT', () => {
     console.log('[Indexer] SIGINT received, shutting down gracefully');
-    unsubscribe();
+    unsubscribeFactory();
+    unsubscribeTreasury();
     process.exit(0);
   });
 
@@ -255,7 +268,7 @@ export async function processLedger(ledger_sequence: number): Promise<void> {
       filters: [
         {
           type: 'contract',
-          contractIds: [FACTORY_CONTRACT, TREASURY_CONTRACT],
+          contractIds: [FACTORY_CONTRACT, TREASURY_CONTRACT].filter(id => id),
           topics: [['*']]
         }
       ],

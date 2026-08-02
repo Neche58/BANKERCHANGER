@@ -71,6 +71,26 @@ export async function pollEvents() {
 
   let cursor = (await getCursor()) || '';
 
+  // ── Graceful shutdown handlers ──────────────────────────────────────────
+  // Save cursor before exit to avoid re-processing events on restart
+  const handleShutdown = async (signal: string) => {
+    log('info', `${signal} received, saving cursor and exiting gracefully`, { cursor });
+    pollerHealth.isRunning = false;
+    try {
+      await saveCursor(cursor);
+      log('info', 'Cursor saved successfully', { cursor });
+    } catch (err) {
+      log('error', 'Failed to save cursor during graceful shutdown', {
+        error: err instanceof Error ? err.message : String(err),
+        cursor,
+      });
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
+
   // Recursive async loop with exponential backoff
   async function pollLoop(): Promise<void> {
     try {

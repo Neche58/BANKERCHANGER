@@ -21,6 +21,7 @@ const envSchema = z.object({
   HORIZON_URL: z.string().url().optional(),
   ORACLE_PUBLIC_KEY: z.string().optional(),
   ADMIN_PUBLIC_KEY: z.string().optional(),
+  TREASURY_CONTRACT_ADDRESS: z.string().optional(),
   ORACLE_API_KEY: z.string().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   ENABLE_SWAGGER: z.coerce.boolean().default(false),
