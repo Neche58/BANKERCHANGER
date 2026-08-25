@@ -88,6 +88,10 @@ pub enum ContractError {
     OracleAlreadyWhitelisted = 51,
     /// Too many markets were requested in one query
     TooManyMarkets = 52,
+    /// WASM hash for market contract has not been set by admin
+    WasmHashNotSet = 53,
+    /// Oracle address is not whitelisted
+    OracleNotWhitelisted = 54,
 
     // ── Reentrancy ─────────────────────────────────────────
     /// A claim or refund transfer is already in progress

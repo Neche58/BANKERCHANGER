@@ -422,7 +422,7 @@ mod tests {
 #[cfg(test)]
 mod proptest_tests {
     use proptest::prelude::*;
-    use super::compute_odds;
+    use super::*;
 
     proptest! {
         /// For any random positive pool values and valid bet, compute_odds must never panic.

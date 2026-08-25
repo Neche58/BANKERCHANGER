@@ -401,7 +401,9 @@ mod tests {
         let client = TreasuryClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         let market = Address::generate(&env);
-        client.initialize(&admin, &1_000_000_i128);
+        let token = Address::generate(&env);
+        let factory = Address::generate(&env);
+        client.initialize(&admin, &token, &factory, &1_000_000_i128);
         (env, client, admin, market)
     }
 
@@ -463,10 +465,9 @@ mod tests {
         let client = TreasuryClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         let market = Address::generate(&env);
-        client.initialize(&admin, &1_000_000_i128);
-
-        // Create a real token, mint to market so the transfer in deposit_fees succeeds.
         let token = setup_token(&env, &admin, &market, amount);
+        let factory = Address::generate(&env);
+        client.initialize(&admin, &token, &factory, &1_000_000_i128);
 
         client.approve_market(&admin, &market);
         client.deposit_fees(&market, &token, &amount);
@@ -546,8 +547,9 @@ mod deposit_fees_tests {
         let client = TreasuryClient::new(&env, &id);
         let admin = Address::generate(&env);
         let market = Address::generate(&env);
-        client.initialize(&admin, &1_000_000_i128);
         let token = env.register_stellar_asset_contract(admin.clone());
+        let factory = Address::generate(&env);
+        client.initialize(&admin, &token, &factory, &1_000_000_i128);
         StellarAssetClient::new(&env, &token).mint(&market, &10_000_000_i128);
         (env, client, admin, market, token)
     }
@@ -610,13 +612,13 @@ mod initialize_tests {
         let env = Env::default();
         let client = setup_client(&env);
         let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+        let factory = Address::generate(&env);
 
-        client.initialize(&admin, &5_000_000i128);
+        client.initialize(&admin, &token, &factory, &5_000_000i128);
 
         // Withdrawal limit is readable via get_daily_withdrawal_amount (starts at 0)
         assert_eq!(client.get_daily_withdrawal_amount(), 0);
-        // Accumulated fees for any token start at 0
-        let token = Address::generate(&env);
         assert_eq!(client.get_accumulated_fees(&token), 0);
     }
 
@@ -626,9 +628,11 @@ mod initialize_tests {
         let env = Env::default();
         let client = setup_client(&env);
         let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+        let factory = Address::generate(&env);
 
-        client.initialize(&admin, &1_000_000i128);
-        let result = client.try_initialize(&admin, &1_000_000i128);
+        client.initialize(&admin, &token, &factory, &1_000_000i128);
+        let result = client.try_initialize(&admin, &token, &factory, &1_000_000i128);
         assert!(result.is_err());
     }
 
@@ -638,12 +642,13 @@ mod initialize_tests {
         let env = Env::default();
         let client = setup_client(&env);
         let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+        let factory = Address::generate(&env);
         let limit = 1_000_000i128;
 
-        client.initialize(&admin, &limit);
+        client.initialize(&admin, &token, &factory, &limit);
 
         // A withdrawal above the limit must fail
-        let token = Address::generate(&env);
         let dest = Address::generate(&env);
         let result = client.try_withdraw_fees(&admin, &token, &(limit + 1), &dest);
         assert!(result.is_err());
@@ -655,7 +660,9 @@ mod initialize_tests {
         let env = Env::default();
         let client = setup_client(&env);
         let admin = Address::generate(&env);
-        client.initialize(&admin, &1_000_000i128);
+        let token = Address::generate(&env);
+        let factory = Address::generate(&env);
+        client.initialize(&admin, &token, &factory, &1_000_000i128);
 
         let token1 = Address::generate(&env);
         let token2 = Address::generate(&env);
@@ -669,7 +676,9 @@ mod initialize_tests {
         let env = Env::default();
         let client = setup_client(&env);
         let admin = Address::generate(&env);
-        client.initialize(&admin, &1_000_000i128);
+        let token = Address::generate(&env);
+        let factory = Address::generate(&env);
+        client.initialize(&admin, &token, &factory, &1_000_000i128);
 
         assert_eq!(client.get_daily_withdrawal_amount(), 0);
     }
@@ -681,7 +690,7 @@ mod initialize_tests {
 #[cfg(test)]
 mod treasury_lifecycle_tests {
     use soroban_sdk::{
-        testutils::Address as _,
+        testutils::{Address as _, Ledger},
         token::StellarAssetClient,
         Address, Env,
     };
@@ -693,8 +702,9 @@ mod treasury_lifecycle_tests {
         let client = TreasuryClient::new(env, &id);
         let admin = Address::generate(env);
         let market = Address::generate(env);
-        client.initialize(&admin, &limit);
         let token = env.register_stellar_asset_contract(admin.clone());
+        let factory = Address::generate(env);
+        client.initialize(&admin, &token, &factory, &limit);
         (client, admin, market, token)
     }
 
@@ -856,9 +866,10 @@ mod treasury_lifecycle_tests {
         let admin = Address::generate(&env);
         let market = Address::generate(&env);
         let limit = 10_000_000i128;
-        client.initialize(&admin, &limit);
-
         let token = env.register_stellar_asset_contract(admin.clone());
+        let factory = Address::generate(&env);
+        client.initialize(&admin, &token, &factory, &limit);
+
         StellarAssetClient::new(&env, &token).mint(&market, &1_000_000_000i128);
         client.approve_market(&admin, &market);
         client.deposit_fees(&market, &token, &1_000_000_000i128);
@@ -866,17 +877,30 @@ mod treasury_lifecycle_tests {
         let dest = Address::generate(&env);
         let day_secs = 86_400u64;
 
+        let set_ledger_time = |ts: u64| {
+            env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+                timestamp: ts,
+                protocol_version: 20,
+                sequence_number: 100,
+                network_id: Default::default(),
+                base_reserve: 1,
+                min_temp_entry_ttl: 16,
+                min_persistent_entry_ttl: 4096,
+                max_entry_ttl: 6_311_520,
+            });
+        };
+
         // Day 1 — first withdrawal
-        env.ledger().set_timestamp(day_secs);
+        set_ledger_time(day_secs);
         client.withdraw_fees(&admin, &token, &limit, &dest);
         assert_eq!(client.get_daily_withdrawal_amount(), limit);
 
         // Day 2 — map should have 2 entries
-        env.ledger().set_timestamp(day_secs * 2);
+        set_ledger_time(day_secs * 2);
         client.withdraw_fees(&admin, &token, &limit, &dest);
 
         // Day 3 — map should still have ≤2 entries (day 1 pruned)
-        env.ledger().set_timestamp(day_secs * 3);
+        set_ledger_time(day_secs * 3);
         client.withdraw_fees(&admin, &token, &limit, &dest);
 
         // Verify map has at most 2 entries by reading storage directly

@@ -2037,7 +2037,7 @@ mod bet_timing_lock_tests {
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &10_000_000i128);
 
-        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
         assert!(result.is_ok(), "Bet before lock threshold must succeed");
     }
 
@@ -2051,7 +2051,7 @@ mod bet_timing_lock_tests {
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &10_000_000i128);
 
-        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
         assert!(result.is_err(), "Bet at exact lock threshold must return BettingClosed");
     }
 
@@ -2065,7 +2065,7 @@ mod bet_timing_lock_tests {
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &10_000_000i128);
 
-        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
         assert!(result.is_err(), "Bet after lock threshold must return BettingClosed");
     }
 }
@@ -2136,7 +2136,7 @@ mod min_bet_enforcement_tests {
         let (client, token_id) = setup(&env, min_bet_amount);
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &min_bet_amount);
-        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &min_bet_amount, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &min_bet_amount, &token_id, &0i128);
         assert!(result.is_ok(), "Bet at exact min_bet_amount must succeed");
     }
 
@@ -2148,7 +2148,7 @@ mod min_bet_enforcement_tests {
         let (client, token_id) = setup(&env, min_bet_amount);
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &min_bet_amount);
-        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &(min_bet_amount - 1), &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &(min_bet_amount - 1), &token_id, &0i128);
         assert!(result.is_err(), "Bet below min_bet_amount must return BetTooSmall");
     }
 
@@ -2159,7 +2159,7 @@ mod min_bet_enforcement_tests {
         let (client, token_id) = setup(&env, 1_000_000);
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &1_000_000);
-        let result = client.try_place_bet(&bettor, &BetSide::FighterB, &1i128, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterB, &1i128, &token_id, &0i128);
         assert!(result.is_err());
     }
 
@@ -2172,10 +2172,10 @@ mod min_bet_enforcement_tests {
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &min_bet_amount);
         // min_bet_amount - 1 must fail
-        let fail = client.try_place_bet(&bettor, &BetSide::FighterA, &(min_bet_amount - 1), &token_id);
+        let fail = client.try_place_bet(&bettor, &BetSide::FighterA, &(min_bet_amount - 1), &token_id, &0i128);
         assert!(fail.is_err());
         // min_bet_amount must succeed
-        let ok = client.try_place_bet(&bettor, &BetSide::FighterA, &min_bet_amount, &token_id);
+        let ok = client.try_place_bet(&bettor, &BetSide::FighterA, &min_bet_amount, &token_id, &0i128);
         assert!(ok.is_ok());
     }
 }
@@ -2247,7 +2247,7 @@ mod place_bet_boundary_fuzz_tests {
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &10_000_000i128);
 
-        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &0i128, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &0i128, &token_id, &0i128);
         assert_eq!(result.unwrap_err(), Ok(ContractError::InvalidAmount));
     }
 
@@ -2258,7 +2258,7 @@ mod place_bet_boundary_fuzz_tests {
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &10_000_000i128);
 
-        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &(-1i128), &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &(-1i128), &token_id, &0i128);
         assert_eq!(result.unwrap_err(), Ok(ContractError::InvalidAmount));
     }
 
@@ -2269,7 +2269,7 @@ mod place_bet_boundary_fuzz_tests {
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &1_000_000i128);
 
-        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &2_000_000i128, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &2_000_000i128, &token_id, &0i128);
         assert!(result.is_err(), "Amount greater than balance must fail gracefully");
     }
 
@@ -2281,7 +2281,7 @@ mod place_bet_boundary_fuzz_tests {
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &i128::MAX);
 
         let amount = i128::MAX;
-        let result = client.try_place_bet(&bettor, &BetSide::Draw, &amount, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::Draw, &amount, &token_id, &0i128);
         assert!(result.is_ok(), "Max i128 bet amount must not overflow pool arithmetic");
         let state = client.get_state();
         assert_eq!(state.pool_draw, amount);
@@ -2296,7 +2296,7 @@ mod place_bet_boundary_fuzz_tests {
             let bettor = Address::generate(&env);
             StellarAssetClient::new(&env, &token_id).mint(&bettor, &10_000_000i128);
 
-            let result = client.try_place_bet(&bettor, &BetSide::FighterB, &amount, &token_id);
+            let result = client.try_place_bet(&bettor, &BetSide::FighterB, &amount, &token_id, &0i128);
             prop_assert_eq!(result.unwrap_err(), Ok(ContractError::InvalidAmount));
         }
     }
@@ -2380,8 +2380,8 @@ mod get_all_bets_tests {
         StellarAssetClient::new(&env, &token_id).mint(&bettor1, &2_000_000i128);
         StellarAssetClient::new(&env, &token_id).mint(&bettor2, &2_000_000i128);
 
-        client.place_bet(&bettor1, &BetSide::FighterA, &1_000_000i128, &token_id);
-        client.place_bet(&bettor2, &BetSide::FighterB, &1_000_000i128, &token_id);
+        client.place_bet(&bettor1, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor2, &BetSide::FighterB, &1_000_000i128, &token_id, &0i128);
 
         let result = client.get_all_bets(&0u32, &10u32);
         assert_eq!(result.len(), 2);
@@ -2400,9 +2400,9 @@ mod get_all_bets_tests {
         StellarAssetClient::new(&env, &token_id).mint(&bettor2, &2_000_000i128);
         StellarAssetClient::new(&env, &token_id).mint(&bettor3, &2_000_000i128);
 
-        client.place_bet(&bettor1, &BetSide::FighterA, &1_000_000i128, &token_id);
-        client.place_bet(&bettor2, &BetSide::FighterB, &1_000_000i128, &token_id);
-        client.place_bet(&bettor3, &BetSide::Draw, &1_000_000i128, &token_id);
+        client.place_bet(&bettor1, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor2, &BetSide::FighterB, &1_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor3, &BetSide::Draw, &1_000_000i128, &token_id, &0i128);
 
         // offset=1, limit=10 → should return 2 records
         let result = client.get_all_bets(&1u32, &10u32);
@@ -2418,7 +2418,7 @@ mod get_all_bets_tests {
         for _ in 0..3 {
             let bettor = Address::generate(&env);
             StellarAssetClient::new(&env, &token_id).mint(&bettor, &2_000_000i128);
-            client.place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id);
+            client.place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
         }
 
         // limit=100 capped at 50, but only 3 bets exist → returns 3
@@ -2434,7 +2434,7 @@ mod get_all_bets_tests {
 
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &2_000_000i128);
-        client.place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id);
+        client.place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
 
         let result = client.get_all_bets(&99u32, &10u32);
         assert_eq!(result.len(), 0);
@@ -2448,7 +2448,7 @@ mod get_all_bets_tests {
 
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &2_000_000i128);
-        client.place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id);
+        client.place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
 
         let result = client.get_all_bets(&0u32, &0u32);
         assert_eq!(result.len(), 0);
@@ -2534,8 +2534,8 @@ mod market_lifecycle_tests {
         StellarAssetClient::new(&env, &token_id).mint(&bettor1, &10_000_000i128);
         StellarAssetClient::new(&env, &token_id).mint(&bettor2, &5_000_000i128);
 
-        client.place_bet(&bettor1, &BetSide::FighterA, &10_000_000i128, &token_id);
-        client.place_bet(&bettor2, &BetSide::FighterB, &5_000_000i128, &token_id);
+        client.place_bet(&bettor1, &BetSide::FighterA, &10_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor2, &BetSide::FighterB, &5_000_000i128, &token_id, &0i128);
 
         let state = client.get_state();
         assert_eq!(state.pool_a, 10_000_000);
@@ -2589,8 +2589,8 @@ mod market_lifecycle_tests {
         StellarAssetClient::new(&env, &token_id).mint(&bettor1, &3_000_000i128);
         StellarAssetClient::new(&env, &token_id).mint(&bettor2, &7_000_000i128);
 
-        client.place_bet(&bettor1, &BetSide::FighterA, &3_000_000i128, &token_id);
-        client.place_bet(&bettor2, &BetSide::FighterB, &7_000_000i128, &token_id);
+        client.place_bet(&bettor1, &BetSide::FighterA, &3_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor2, &BetSide::FighterB, &7_000_000i128, &token_id, &0i128);
 
         client.cancel_market(&factory, &soroban_sdk::String::from_str(&env, "fight cancelled"));
         assert_eq!(client.get_state().status, MarketStatus::Cancelled);
@@ -2677,9 +2677,9 @@ mod market_lifecycle_tests {
         StellarAssetClient::new(&env, &token_id).mint(&bettor2, &20_000_000i128);
         StellarAssetClient::new(&env, &token_id).mint(&bettor3, &30_000_000i128);
 
-        client.place_bet(&bettor1, &BetSide::FighterA, &10_000_000i128, &token_id);
-        client.place_bet(&bettor2, &BetSide::FighterA, &20_000_000i128, &token_id);
-        client.place_bet(&bettor3, &BetSide::FighterA, &30_000_000i128, &token_id);
+        client.place_bet(&bettor1, &BetSide::FighterA, &10_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor2, &BetSide::FighterA, &20_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor3, &BetSide::FighterA, &30_000_000i128, &token_id, &0i128);
 
         assert_eq!(client.get_state().pool_a, 60_000_000);
 
@@ -2742,7 +2742,7 @@ mod market_lifecycle_tests {
         let bettor = Address::generate(&env);
         let token_id = env.register_stellar_asset_contract(factory.clone());
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &50_000_000i128);
-        client.place_bet(&bettor, &BetSide::FighterA, &10_000_000i128, &token_id);
+        client.place_bet(&bettor, &BetSide::FighterA, &10_000_000i128, &token_id, &0i128);
 
         // Verify bet was recorded
         let state_with_bets = client.get_state();
@@ -2940,7 +2940,7 @@ mod stale_oracle_reports_tests {
         let (client, contract_id, factory) = setup(&env, now);
         let oracle = Address::generate(&env);
 
-        inject_pending(&env, &contract_id, &[(oracle, make_report(&env, &oracle, submitted_at))]);
+        inject_pending(&env, &contract_id, &[(oracle.clone(), make_report(&env, &oracle, submitted_at))]);
 
         let cleared = client.clear_stale_reports(&factory);
         assert_eq!(cleared, 1, "Report aged exactly REPORT_TTL must be cleared");
@@ -3315,6 +3315,7 @@ mod reentrancy_regression_tests {
             &BetSide::FighterA,
             &1_000_000i128,
             &token_id,
+            &0i128,
         );
         // CLAIMING does not gate place_bet — only PAUSED does
         assert!(result.is_ok(),
@@ -3410,7 +3411,7 @@ mod event_emission_consistency_tests {
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &10_000_000i128);
 
-        client.place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id);
+        client.place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
 
         let ev = last_event(&env);
         assert_eq!(topic_sym(&env, &ev), Symbol::new(&env, "bet_placed"),
@@ -3432,10 +3433,10 @@ mod event_emission_consistency_tests {
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &10_000_000i128);
 
         let event_count_before = env.events().all().len();
-        let _ = client.try_place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id);
+        let _ = client.try_place_bet(&bettor, &BetSide::FighterA, &1_000_000i128, &token_id, &0i128);
 
         // No new contract events should have been emitted on failure
-        let new_events: Vec<_> = env.events().all()
+        let new_events: std::vec::Vec<_> = env.events().all()
             .iter()
             .skip(event_count_before as usize)
             .filter(|e| e.0 == _contract_id)
@@ -3452,9 +3453,9 @@ mod event_emission_consistency_tests {
         // Set time past lock threshold so lock_market succeeds
         let lock_threshold = 200_000u64 - 3_600;
         let env = Env::default();
-        let (client, _contract_id, _treasury, _token_id) = setup(&env, lock_threshold + 1);
+        let (client, _contract_id, factory, _token_id) = setup(&env, lock_threshold + 1);
 
-        client.lock_market();
+        client.lock_market(&factory);
 
         let ev = last_event(&env);
         assert_eq!(topic_sym(&env, &ev), Symbol::new(&env, "market_locked"),
@@ -3667,7 +3668,7 @@ mod event_emission_consistency_tests {
 
         let bettor = Address::generate(&env);
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &5_000_000i128);
-        client.place_bet(&bettor, &BetSide::Draw, &1_000_000i128, &token_id);
+        client.place_bet(&bettor, &BetSide::Draw, &1_000_000i128, &token_id, &0i128);
 
         let ev = last_event(&env);
         // Topic[0] = Symbol, Topic[1] = market_id
@@ -3683,8 +3684,8 @@ mod event_emission_consistency_tests {
     fn test_market_locked_event_topic_structure() {
         let lock_threshold = 200_000u64 - 3_600;
         let env = Env::default();
-        let (client, _contract_id, _treasury, _token_id) = setup(&env, lock_threshold + 10);
-        client.lock_market();
+        let (client, _contract_id, factory, _token_id) = setup(&env, lock_threshold + 10);
+        client.lock_market(&factory);
 
         let ev = last_event(&env);
         assert_eq!(ev.1.len(), 2, "market_locked must have exactly 2 topics");
@@ -3895,7 +3896,7 @@ mod slippage_bounds_tests {
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &100_000i128);
 
         // 0.01 XLM into 10 XLM pool — impact ≈ 0.1%, well below 30%
-        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &10_000i128, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterA, &10_000i128, &token_id, &0i128);
         assert!(result.is_ok(),
             "Low-slippage bet into deep pool must succeed");
     }
@@ -3913,7 +3914,7 @@ mod slippage_bounds_tests {
         // Bet 90% of the pool — guaranteed to blow past 30% impact
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &90_000i128);
 
-        let result = client.try_place_bet(&bettor, &BetSide::FighterB, &90_000i128, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::FighterB, &90_000i128, &token_id, &0i128);
         assert!(result.is_err(),
             "Bet with >30% slippage into thin pool must be rejected");
     }
@@ -3932,7 +3933,7 @@ mod slippage_bounds_tests {
         StellarAssetClient::new(&env, &token_id).mint(&bettor, &5_000_000i128);
 
         // Any amount is fine when pools are zero (no AMM guard applies)
-        let result = client.try_place_bet(&bettor, &BetSide::Draw, &1_000_000i128, &token_id);
+        let result = client.try_place_bet(&bettor, &BetSide::Draw, &1_000_000i128, &token_id, &0i128);
         assert!(result.is_ok(),
             "When pools are zero the slippage guard must be skipped");
     }

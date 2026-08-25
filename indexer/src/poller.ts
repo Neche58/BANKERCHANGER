@@ -251,7 +251,7 @@ async function getLatestLedger(): Promise<number> {
 
 export function processEvent(event: rpc.Api.EventResponse) {
   // Topics are scVals, typically symbol strings
-  const topics = event.topic.map(t => {
+  const topics = event.topic.map((t: any) => {
     try {
       return scValToNative(t);
     } catch {

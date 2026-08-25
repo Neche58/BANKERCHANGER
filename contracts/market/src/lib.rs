@@ -37,6 +37,7 @@ const CLAIMING: &str     = "CLAIMING";
 const PAUSED: &str       = "PAUSED";
 /// Pending oracle reports for 2-of-3 consensus
 const PENDING_REPORTS: &str = "PENDING_REPORTS";
+const REPORT_TTL: u64 = 172_800;
 
 // ─── Storage TTL Constants ────────────────────────────────────────────────────
 /// Maximum TTL for market data (30 days in ledger entries)
@@ -126,7 +127,7 @@ impl Market {
             .get(&FACTORY)
             .ok_or(ContractError::NotFactory)?;
         let client = FactoryClient::new(env, &factory);
-        Ok(client.get_oracle_key(caller.clone()))
+        Ok(client.get_oracle_key(caller))
     }
 
     /// Extend TTL on market data entries to prevent premature expiration.
@@ -470,6 +471,36 @@ impl Market {
         }
 
         Ok(())
+    }
+
+    /// Clears oracle reports from PENDING_REPORTS that are older than REPORT_TTL.
+    /// Callable by factory / admin. Returns the number of evicted reports.
+    pub fn clear_stale_reports(env: Env, caller: Address) -> Result<u32, ContractError> {
+        caller.require_auth();
+        let factory: Address = env
+            .storage().persistent()
+            .get(&FACTORY)
+            .ok_or(ContractError::NotFactory)?;
+        if caller != factory {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let pending: Map<Address, OracleReport> =
+            env.storage().persistent().get(&PENDING_REPORTS).unwrap_or_else(|| Map::new(&env));
+        let now = env.ledger().timestamp();
+        let mut updated: Map<Address, OracleReport> = Map::new(&env);
+        let mut cleared = 0u32;
+
+        for (addr, rep) in pending.iter() {
+            if now.saturating_sub(rep.reported_at) >= REPORT_TTL {
+                cleared += 1;
+            } else {
+                updated.set(addr, rep);
+            }
+        }
+
+        env.storage().persistent().set(&PENDING_REPORTS, &updated);
+        Ok(cleared)
     }
 
     // =========================================================================
