@@ -197,7 +197,7 @@ pub struct UserPosition {
 
 /// Receipt returned to the bettor after a successful claim.
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ClaimReceipt {
     pub bettor: Address,
     pub market_id: u64,
@@ -206,4 +206,41 @@ pub struct ClaimReceipt {
     /// Platform fee deducted before transfer
     pub fee_deducted: i128,
     pub claimed_at: u64,
+}
+
+// ─── Treasury Audit Trail ─────────────────────────────────────────────────────
+
+/// The type of fund-moving operation recorded in the treasury audit ledger.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum AuditAction {
+    /// A market deposited fees into the treasury.
+    FeeDeposited,
+    /// Fees were received from a registered market (per-market breakdown).
+    FeeReceived,
+    /// The admin withdrew accumulated fees.
+    FeeWithdrawn,
+    /// The admin emergency-drained all fees for a token.
+    FeeDrained,
+}
+
+/// An immutable, append-only entry in the treasury audit ledger.
+///
+/// Entries are keyed by a monotonically increasing `id` and are never mutated
+/// or removed — they form a tamper-evident history of every fund movement.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuditEntry {
+    /// Monotonically increasing entry id (1-based).
+    pub id: u64,
+    /// The action that produced this entry.
+    pub action: AuditAction,
+    /// The token involved in the operation.
+    pub token: Address,
+    /// The signed amount moved (positive for in, negative for out).
+    pub amount: i128,
+    /// The acting address (market or admin).
+    pub actor: Address,
+    /// Ledger timestamp when the entry was recorded.
+    pub timestamp: u64,
 }
