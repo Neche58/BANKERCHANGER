@@ -916,3 +916,147 @@ mod treasury_lifecycle_tests {
         assert!(daily_len <= 2, "DAILY_WITHDRAWN map length should be ≤ 2, got {daily_len}");
     }
 }
+
+// ============================================================
+// TASK 11: Soroban Contract Integrity & Safety Verification Tests
+// Covers: storage TTL extensions across persistent maps,
+//         auth checks and error handling audit,
+//         property-based invariants & fee conservation.
+// ============================================================
+#[cfg(test)]
+mod task11_treasury_contract_integrity_tests {
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger, LedgerInfo},
+        token::StellarAssetClient,
+        Address, Env, Map,
+    };
+    use boxmeout_shared::errors::ContractError;
+    use crate::{Treasury, TreasuryClient};
+
+    fn setup_treasury(env: &Env, limit: i128) -> (TreasuryClient<'static>, Address, Address, Address) {
+        env.mock_all_auths();
+        env.ledger().set(LedgerInfo {
+            timestamp: 100_000,
+            protocol_version: 20,
+            sequence_number: 1_000,
+            network_id: Default::default(),
+            base_reserve: 1,
+            min_temp_entry_ttl: 16,
+            min_persistent_entry_ttl: 4096,
+            max_entry_ttl: 6_311_520,
+        });
+
+        let contract_id = env.register_contract(None, Treasury);
+        let client = TreasuryClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        let factory = Address::generate(env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+
+        client.initialize(&admin, &token, &factory, &limit);
+        (client, admin, factory, token)
+    }
+
+    // ── 1. Storage TTL Extensions Across Persistent Maps ─────────
+    #[test]
+    fn test_task11_persistent_map_ttl_survival() {
+        let env = Env::default();
+        let limit = 50_000_000i128;
+        let (client, admin, _factory, token) = setup_treasury(&env, limit);
+        let market = Address::generate(&env);
+
+        client.approve_market(&admin, &market);
+        StellarAssetClient::new(&env, &token).mint(&market, &100_000_000i128);
+        client.deposit_fees(&market, &token, &100_000_000i128);
+
+        // Advance ledger 50,000 entries into the future
+        env.ledger().set(LedgerInfo {
+            timestamp: 100_000 + 86_400 * 10,
+            protocol_version: 20,
+            sequence_number: 51_000,
+            network_id: Default::default(),
+            base_reserve: 1,
+            min_temp_entry_ttl: 16,
+            min_persistent_entry_ttl: 4096,
+            max_entry_ttl: 6_311_520,
+        });
+
+        // Verify storage maps persist and remain readable
+        assert_eq!(client.get_accumulated_fees(&token), 100_000_000i128);
+        assert_eq!(client.get_withdrawal_limit(), limit);
+        assert!(client.is_market_approved(&market));
+    }
+
+    // ── 2. Comprehensive Auth & Error Handling Audit ─────────────
+    #[test]
+    fn test_task11_auth_checks_and_error_handling() {
+        let env = Env::default();
+        let limit = 50_000_000i128;
+        let (client, admin, _factory, token) = setup_treasury(&env, limit);
+        let non_admin = Address::generate(&env);
+        let market = Address::generate(&env);
+        let dest = Address::generate(&env);
+
+        // Non-admin cannot approve or revoke markets
+        let err_approve = client.try_approve_market(&non_admin, &market);
+        assert_eq!(err_approve.unwrap_err(), Ok(ContractError::Unauthorized));
+
+        let err_revoke = client.try_revoke_market(&non_admin, &market);
+        assert_eq!(err_revoke.unwrap_err(), Ok(ContractError::Unauthorized));
+
+        // Non-admin cannot update withdrawal limit
+        let err_limit = client.try_update_withdrawal_limit(&non_admin, &100_000_000i128);
+        assert_eq!(err_limit.unwrap_err(), Ok(ContractError::Unauthorized));
+
+        // Non-admin cannot pause or unpause withdrawals
+        let err_pause = client.try_pause_withdrawals(&non_admin);
+        assert_eq!(err_pause.unwrap_err(), Ok(ContractError::Unauthorized));
+
+        let err_unpause = client.try_unpause_withdrawals(&non_admin);
+        assert_eq!(err_unpause.unwrap_err(), Ok(ContractError::Unauthorized));
+
+        // Non-admin cannot withdraw fees
+        let err_withdraw = client.try_withdraw_fees(&non_admin, &token, &15_000_000i128, &dest);
+        assert_eq!(err_withdraw.unwrap_err(), Ok(ContractError::Unauthorized));
+
+        // Unapproved market deposit rejected
+        let err_unapproved = client.try_deposit_fees(&market, &token, &20_000_000i128);
+        assert_eq!(err_unapproved.unwrap_err(), Ok(ContractError::MarketNotApproved));
+    }
+
+    // ── 3. Property-Based Fee Conservation & Daily Limits ────────
+    #[test]
+    fn test_task11_property_fee_conservation() {
+        let env = Env::default();
+        let limit = 50_000_000i128;
+        let (client, admin, _factory, token) = setup_treasury(&env, limit);
+        let market1 = Address::generate(&env);
+        let market2 = Address::generate(&env);
+        let dest = Address::generate(&env);
+
+        client.approve_market(&admin, &market1);
+        client.approve_market(&admin, &market2);
+
+        let deposit1 = 30_000_000i128;
+        let deposit2 = 45_000_000i128;
+        let total_deposited = deposit1 + deposit2;
+
+        let token_client = StellarAssetClient::new(&env, &token);
+        token_client.mint(&market1, &deposit1);
+        token_client.mint(&market2, &deposit2);
+
+        client.deposit_fees(&market1, &token, &deposit1);
+        client.deposit_fees(&market2, &token, &deposit2);
+
+        assert_eq!(client.get_accumulated_fees(&token), total_deposited);
+
+        // Withdraw partial amount (valid > MIN_WITHDRAWAL and <= limit)
+        let withdraw_amt = 25_000_000i128;
+        client.withdraw_fees(&admin, &token, &withdraw_amt, &dest);
+
+        // Invariant: remaining + total_withdrawn == total_deposited
+        let remaining = client.get_accumulated_fees(&token);
+        assert_eq!(remaining + withdraw_amt, total_deposited);
+        assert_eq!(soroban_sdk::token::Client::new(&env, &token).balance(&dest), withdraw_amt);
+    }
+}
+
