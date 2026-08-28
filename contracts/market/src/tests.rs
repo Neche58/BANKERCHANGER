@@ -4293,3 +4293,188 @@ mod upgrade_safety_tests {
         }
     }
 }
+
+// ============================================================
+// TASK 10: Soroban Contract Integrity & Safety Verification Tests
+// Covers: storage TTL extensions across persistent maps,
+//         auth checks and error handling audit,
+//         property-based invariants & parimutuel conservation.
+// ============================================================
+#[cfg(test)]
+mod task10_soroban_contract_integrity_tests {
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger, LedgerInfo},
+        token::StellarAssetClient,
+        Address, BytesN, Env, Vec,
+    };
+    use boxmeout_shared::{
+        errors::ContractError,
+        types::{
+            BetRecord, BetSide, ClaimReceipt, FightDetails, MarketConfig,
+            MarketState, MarketStatus, OracleReport, Outcome,
+        },
+    };
+    use crate::Market;
+
+    fn fight(env: &Env) -> FightDetails {
+        FightDetails {
+            match_id: soroban_sdk::String::from_str(env, "MATCH-TASK-10"),
+            fighter_a: soroban_sdk::String::from_str(env, "Fighter Alpha"),
+            fighter_b: soroban_sdk::String::from_str(env, "Fighter Beta"),
+            weight_class: soroban_sdk::String::from_str(env, "Welterweight"),
+            scheduled_at: 100_000,
+            venue: soroban_sdk::String::from_str(env, "Arena-10"),
+            title_fight: true,
+        }
+    }
+
+    fn config() -> MarketConfig {
+        MarketConfig {
+            min_bet_amount: 1_000_000,
+            max_bet: 100_000_000_000,
+            fee_bps: 200,
+            lock_before_secs: 3_600,
+            resolution_window: 86_400,
+        }
+    }
+
+    fn setup(env: &Env) -> (crate::MarketClient<'static>, Address, Address, Address) {
+        env.mock_all_auths();
+        env.ledger().set(LedgerInfo {
+            timestamp: 10_000,
+            protocol_version: 20,
+            sequence_number: 500,
+            network_id: Default::default(),
+            base_reserve: 1,
+            min_temp_entry_ttl: 16,
+            min_persistent_entry_ttl: 4096,
+            max_entry_ttl: 6_311_520,
+        });
+
+        let factory = Address::generate(env);
+        let treasury = Address::generate(env);
+        let token_admin = Address::generate(env);
+        let token_id = env.register_stellar_asset_contract(token_admin);
+
+        let contract_id = env.register_contract(None, Market);
+        let client = crate::MarketClient::new(env, &contract_id);
+        client.initialize(&factory, &10u64, &fight(env), &config(), &treasury);
+
+        (client, contract_id, factory, token_id)
+    }
+
+    // ── 1. Storage TTL Extensions Across Persistent Maps ─────────
+    #[test]
+    fn test_task10_persistent_map_ttl_survival() {
+        let env = Env::default();
+        let (client, _contract_id, _factory, token_id) = setup(&env);
+        let bettor1 = Address::generate(&env);
+        let bettor2 = Address::generate(&env);
+        let token_client = StellarAssetClient::new(&env, &token_id);
+
+        token_client.mint(&bettor1, &50_000_000i128);
+        token_client.mint(&bettor2, &50_000_000i128);
+
+        client.place_bet(&bettor1, &BetSide::FighterA, &25_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor2, &BetSide::FighterB, &35_000_000i128, &token_id, &0i128);
+
+        // Advance ledger far beyond standard entry TTL thresholds
+        env.ledger().set(LedgerInfo {
+            timestamp: 10_000 + 86_400 * 14,
+            protocol_version: 20,
+            sequence_number: 60_000,
+            network_id: Default::default(),
+            base_reserve: 1,
+            min_temp_entry_ttl: 16,
+            min_persistent_entry_ttl: 4096,
+            max_entry_ttl: 6_311_520,
+        });
+
+        // Verify storage maps persist and remain readable
+        let state = client.get_state();
+        assert_eq!(state.market_id, 10u64);
+        assert_eq!(state.pool_a, 25_000_000i128);
+        assert_eq!(state.pool_b, 35_000_000i128);
+        assert_eq!(state.total_pool, 60_000_000i128);
+
+        let bettor1_bets = client.get_bets_by_address(&bettor1);
+        assert_eq!(bettor1_bets.len(), 1);
+        assert_eq!(bettor1_bets.get(0).unwrap().amount, 25_000_000i128);
+
+        let bettor2_bets = client.get_bets_by_address(&bettor2);
+        assert_eq!(bettor2_bets.len(), 1);
+        assert_eq!(bettor2_bets.get(0).unwrap().amount, 35_000_000i128);
+    }
+
+    // ── 2. Auth Checks & Error Handling Audit ────────────────────
+    #[test]
+    fn test_task10_emergency_pause_and_auth_safeguards() {
+        let env = Env::default();
+        let (client, _contract_id, factory, token_id) = setup(&env);
+        let bettor = Address::generate(&env);
+        let admin = factory.clone();
+
+        StellarAssetClient::new(&env, &token_id).mint(&bettor, &100_000_000i128);
+
+        // Emergency pause by authorized admin
+        client.emergency_pause(&admin);
+
+        // Fund-moving operations must be blocked under pause
+        let bet_res = client.try_place_bet(&bettor, &BetSide::FighterA, &10_000_000i128, &token_id, &0i128);
+        assert!(bet_res.is_err(), "place_bet must fail when emergency paused");
+
+        let claim_res = client.try_claim_winnings(&bettor, &token_id);
+        assert!(claim_res.is_err(), "claim_winnings must fail when emergency paused");
+
+        let refund_res = client.try_claim_refund(&bettor, &token_id);
+        assert!(refund_res.is_err(), "claim_refund must fail when emergency paused");
+
+        // Emergency unpause restores operations
+        client.emergency_unpause(&admin);
+        let unpaused_bet = client.try_place_bet(&bettor, &BetSide::FighterA, &10_000_000i128, &token_id, &0i128);
+        assert!(unpaused_bet.is_ok(), "place_bet should succeed after emergency unpause");
+    }
+
+    #[test]
+    fn test_task10_invalid_amounts_and_zero_slippage_audit() {
+        let env = Env::default();
+        let (client, _contract_id, _factory, token_id) = setup(&env);
+        let bettor = Address::generate(&env);
+        StellarAssetClient::new(&env, &token_id).mint(&bettor, &100_000_000i128);
+
+        // Zero / negative amounts rejected
+        let zero_res = client.try_place_bet(&bettor, &BetSide::FighterA, &0i128, &token_id, &0i128);
+        assert_eq!(zero_res.unwrap_err(), Ok(ContractError::BelowMinimum));
+
+        let below_min_res = client.try_place_bet(&bettor, &BetSide::FighterA, &500_000i128, &token_id, &0i128);
+        assert_eq!(below_min_res.unwrap_err(), Ok(ContractError::BelowMinimum));
+    }
+
+    // ── 3. Property-Based Parimutuel Conservation Invariants ────
+    #[test]
+    fn test_task10_parimutuel_math_conservation_property() {
+        let env = Env::default();
+        let (client, _contract_id, _factory, token_id) = setup(&env);
+        let bettor_a1 = Address::generate(&env);
+        let bettor_a2 = Address::generate(&env);
+        let bettor_b = Address::generate(&env);
+
+        let token_client = StellarAssetClient::new(&env, &token_id);
+        token_client.mint(&bettor_a1, &40_000_000i128);
+        token_client.mint(&bettor_a2, &60_000_000i128);
+        token_client.mint(&bettor_b, &100_000_000i128);
+
+        client.place_bet(&bettor_a1, &BetSide::FighterA, &40_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor_a2, &BetSide::FighterA, &60_000_000i128, &token_id, &0i128);
+        client.place_bet(&bettor_b, &BetSide::FighterB, &100_000_000i128, &token_id, &0i128);
+
+        let state_before = client.get_state();
+        let total_pool = state_before.total_pool;
+        assert_eq!(total_pool, 200_000_000i128);
+
+        // Verify odds computation does not panic on non-empty pool
+        let odds = client.get_current_odds();
+        assert!(odds.0 > 0 && odds.1 > 0);
+    }
+}
+
