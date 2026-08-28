@@ -5,7 +5,7 @@
 
 use soroban_sdk::{Address, Env, String, Symbol};
 
-use crate::types::{BetRecord, ClaimReceipt, Outcome};
+use crate::types::{AuditEntry, BetRecord, ClaimReceipt, Outcome};
 
 /// Emits a `market_created` event when a new market is deployed.
 ///
@@ -132,6 +132,16 @@ pub fn emit_fee_withdrawn(env: &Env, token: Address, amount: i128, destination: 
 pub fn emit_emergency_drain(env: &Env, token: Address, amount: i128, admin: Address) {
     let topics = (Symbol::new(env, "emergency_drain"),);
     env.events().publish(topics, (token, amount, admin));
+}
+
+/// Emits an `audit_recorded` event whenever an immutable audit entry is
+/// appended to the treasury ledger.
+///
+/// Topics: `(Symbol("audit_recorded"),)`
+/// Data:   `AuditEntry`
+pub fn emit_audit_recorded(env: &Env, entry: AuditEntry) {
+    let topics = (Symbol::new(env, "audit_recorded"),);
+    env.events().publish(topics, entry);
 }
 
 /// Emits a `config_updated` event when a configuration parameter is changed.

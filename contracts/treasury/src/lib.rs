@@ -8,6 +8,7 @@
 use soroban_sdk::{contract, contractimpl, token, Address, Env, Map, Vec};
 
 use boxmeout_shared::errors::ContractError;
+use boxmeout_shared::types::{AuditAction, AuditEntry};
 
 const ADMIN: &str                   = "ADMIN";
 const BET_TOKEN: &str               = "BET_TOKEN";
@@ -18,6 +19,9 @@ const APPROVED_MARKETS: &str        = "APPROVED_MARKETS";
 const WITHDRAWAL_LIMIT: &str        = "WITHDRAWAL_LIMIT";
 const DAILY_WITHDRAWN: &str         = "DAILY_WITHDRAWN";
 const WITHDRAWALS_PAUSED: &str      = "WITHDRAWALS_PAUSED";
+const AUDIT_LOG: &str               = "AUDIT_LOG";          // Vec<AuditEntry> (append-only)
+const AUDIT_NEXT_ID: &str           = "AUDIT_NEXT_ID";      // u64 monotonically increasing
+const WITHDRAWAL_IN_PROGRESS: &str  = "WITHDRAWAL_IN_PROGRESS"; // reentrancy guard
 const MIN_WITHDRAWAL: i128          = 10_000_000; // 1 XLM in stroops
 
 #[contract]
@@ -61,6 +65,41 @@ impl Treasury {
         fees.set(token.clone(), current + amount);
         env.storage().persistent().set(&ACCUMULATED_FEES, &fees);
     }
+
+    /// Appends an immutable entry to the audit ledger.
+    ///
+    /// The entry is assigned a monotonically increasing id and pushed onto the
+    /// append-only `AUDIT_LOG`. Existing entries are never modified, so the log
+    /// forms a tamper-evident, immutable history of every fund movement.
+    fn record_audit(
+        env: &Env,
+        action: AuditAction,
+        token: Address,
+        amount: i128,
+        actor: Address,
+    ) {
+        let next_id: u64 = env
+            .storage()
+            .persistent()
+            .get(&AUDIT_NEXT_ID)
+            .unwrap_or(0);
+        let entry = AuditEntry {
+            id: next_id,
+            action: action.clone(),
+            token: token.clone(),
+            amount,
+            actor: actor.clone(),
+            timestamp: env.ledger().timestamp(),
+        };
+
+        let mut log: Vec<AuditEntry> =
+            env.storage().persistent().get(&AUDIT_LOG).unwrap_or_else(|| Vec::new(env));
+        log.push_back(entry.clone());
+
+        env.storage().persistent().set(&AUDIT_LOG, &log);
+        env.storage().persistent().set(&AUDIT_NEXT_ID, &(next_id + 1));
+        boxmeout_shared::emit_audit_recorded(env, entry);
+    }
 }
 
 #[contractimpl]
@@ -88,6 +127,9 @@ impl Treasury {
         env.storage().persistent().set(&DAILY_WITHDRAWN, &Map::<u64, i128>::new(&env));
         env.storage().persistent().set(&APPROVED_MARKETS, &Vec::<Address>::new(&env));
         env.storage().persistent().set(&WITHDRAWALS_PAUSED, &false);
+        env.storage().persistent().set(&AUDIT_LOG, &Vec::<AuditEntry>::new(&env));
+        env.storage().persistent().set(&AUDIT_NEXT_ID, &0u64);
+        env.storage().persistent().set(&WITHDRAWAL_IN_PROGRESS, &false);
         Ok(())
     }
 
@@ -170,6 +212,9 @@ impl Treasury {
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&market, &env.current_contract_address(), &amount);
 
+        // AUDIT — immutable ledger entry
+        Self::record_audit(&env, AuditAction::FeeDeposited, token.clone(), amount, market.clone());
+
         boxmeout_shared::emit_fee_deposited(&env, market, token, amount);
         Ok(())
     }
@@ -208,6 +253,9 @@ impl Treasury {
         env.storage().persistent().set(&ACCUMULATED_FEES_BY_MARKET, &by_market);
 
         // INTERACTIONS — emit event (assumes token was already transferred by Market)
+        // AUDIT — immutable ledger entry
+        Self::record_audit(&env, AuditAction::FeeReceived, token.clone(), amount, market.clone());
+
         boxmeout_shared::emit_fee_deposited(&env, market, token, amount);
         Ok(())
     }
@@ -220,10 +268,15 @@ impl Treasury {
     /// - `DailyWithdrawalLimitExceeded`: Withdrawal exceeds daily limit
     /// - `InsufficientBalance`: Not enough fees accumulated
     ///
-    /// # Security (CEI)
-    /// 1. CHECKS: require_auth, limits, balance
+    /// # Security (CEI + concurrency)
+    /// 1. CHECKS: require_auth, reentrancy guard, limits, balance
     /// 2. EFFECTS: decrement fees + increment daily tracker
     /// 3. INTERACTIONS: token transfer last
+    ///
+    /// The reentrancy guard prevents re-entrant fee withdrawals (e.g. a token
+    /// contract calling back into `withdraw_fees` mid-transfer), and every
+    /// completed withdrawal is recorded in the immutable audit ledger with a
+    /// unique id.
     pub fn withdraw_fees(
         env: Env,
         admin: Address,
@@ -235,19 +288,29 @@ impl Treasury {
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
 
+        // Reentrancy guard — blocks re-entrant double-withdrawal.
+        let guard: bool = env.storage().persistent().get(&WITHDRAWAL_IN_PROGRESS).unwrap_or(false);
+        if guard {
+            return Err(ContractError::ReentrancyGuard);
+        }
+        env.storage().persistent().set(&WITHDRAWAL_IN_PROGRESS, &true);
+
         // Check minimum withdrawal amount
         if amount < MIN_WITHDRAWAL {
+            env.storage().persistent().set(&WITHDRAWAL_IN_PROGRESS, &false);
             return Err(ContractError::BelowMinimum);
         }
 
         // Check paused flag
         let paused: bool = env.storage().persistent().get(&WITHDRAWALS_PAUSED).unwrap_or(false);
         if paused {
+            env.storage().persistent().set(&WITHDRAWAL_IN_PROGRESS, &false);
             return Err(ContractError::DailyWithdrawalLimitExceeded);
         }
 
         let limit: i128 = env.storage().persistent().get(&WITHDRAWAL_LIMIT).unwrap_or(0);
         if amount > limit {
+            env.storage().persistent().set(&WITHDRAWAL_IN_PROGRESS, &false);
             return Err(ContractError::DailyWithdrawalLimitExceeded);
         }
 
@@ -255,7 +318,11 @@ impl Treasury {
         let mut daily: Map<u64, i128> =
             env.storage().persistent().get(&DAILY_WITHDRAWN).unwrap_or_else(|| Map::new(&env));
         let today_total = daily.get(bucket).unwrap_or(0);
-        if today_total + amount > limit * 5 {
+        // Enforce a strict daily cap: running total may never exceed `limit`.
+        // (Previously this compared against `limit * 5`, letting withdrawals
+        // accumulate well beyond the intended cap.)
+        if today_total + amount > limit {
+            env.storage().persistent().set(&WITHDRAWAL_IN_PROGRESS, &false);
             return Err(ContractError::DailyWithdrawalLimitExceeded);
         }
 
@@ -263,6 +330,7 @@ impl Treasury {
             env.storage().persistent().get(&ACCUMULATED_FEES).unwrap_or_else(|| Map::new(&env));
         let balance = fees.get(token.clone()).unwrap_or(0);
         if balance < amount {
+            env.storage().persistent().set(&WITHDRAWAL_IN_PROGRESS, &false);
             return Err(ContractError::InsufficientBalance);
         }
 
@@ -281,9 +349,15 @@ impl Treasury {
         }
         env.storage().persistent().set(&DAILY_WITHDRAWN, &daily);
 
+        // AUDIT — immutable ledger entry (completed withdrawals only)
+        Self::record_audit(&env, AuditAction::FeeWithdrawn, token.clone(), amount, destination.clone());
+
         // INTERACTIONS
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&env.current_contract_address(), &destination, &amount);
+
+        // Clear the reentrancy guard only after the interaction completes.
+        env.storage().persistent().set(&WITHDRAWAL_IN_PROGRESS, &false);
 
         boxmeout_shared::emit_fee_withdrawn(&env, token, amount, destination);
         Ok(())
@@ -379,8 +453,36 @@ impl Treasury {
             token_client.transfer(&env.current_contract_address(), &admin, &balance);
         }
 
+        // AUDIT — immutable ledger entry
+        Self::record_audit(&env, AuditAction::FeeDrained, token.clone(), balance, admin.clone());
+
         boxmeout_shared::emit_emergency_drain(&env, token, balance, admin);
         Ok(())
+    }
+
+    /// Returns the configured daily withdrawal limit.
+    pub fn get_withdrawal_limit(env: Env) -> i128 {
+        env.storage().persistent().get(&WITHDRAWAL_LIMIT).unwrap_or(0)
+    }
+
+    /// Returns the number of immutable audit entries recorded.
+    pub fn get_audit_log_count(env: Env) -> u64 {
+        let log: Vec<AuditEntry> =
+            env.storage().persistent().get(&AUDIT_LOG).unwrap_or_else(|| Vec::new(&env));
+        log.len() as u64
+    }
+
+    /// Returns the audit entry at `index` (0-based insertion order), or None if
+    /// the index is out of range. Entries are immutable and never mutated or
+    /// removed after they are appended.
+    pub fn get_audit_entry(env: Env, index: u64) -> Option<AuditEntry> {
+        let log: Vec<AuditEntry> =
+            env.storage().persistent().get(&AUDIT_LOG).unwrap_or_else(|| Vec::new(&env));
+        let idx_u32 = index as u32;
+        if idx_u32 >= log.len() {
+            return None;
+        }
+        log.get(idx_u32)
     }
 }
 
@@ -692,7 +794,7 @@ mod treasury_lifecycle_tests {
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
         token::StellarAssetClient,
-        Address, Env,
+        Address, Env, Map,
     };
     use super::{Treasury, TreasuryClient};
 
@@ -737,7 +839,7 @@ mod treasury_lifecycle_tests {
     #[test]
     fn test_withdrawal_success() {
         let env = Env::default();
-        let limit = 1_000_000i128;
+        let limit = 10_000_000i128;
         let (client, admin, market, token) = setup(&env, limit);
         StellarAssetClient::new(&env, &token).mint(&market, &limit);
 
@@ -791,7 +893,7 @@ mod treasury_lifecycle_tests {
     #[test]
     fn test_unpause_withdrawals_by_restoring_limit() {
         let env = Env::default();
-        let limit = 1_000_000i128;
+        let limit = 10_000_000i128;
         let (client, admin, market, token) = setup(&env, limit);
         StellarAssetClient::new(&env, &token).mint(&market, &limit);
 
@@ -838,7 +940,7 @@ mod treasury_lifecycle_tests {
     #[test]
     fn test_withdrawal_at_minimum_accepted() {
         let env = Env::default();
-        let limit = 1_000_000i128;
+        let limit = 20_000_000i128;
         let (client, admin, market, token) = setup(&env, limit);
         StellarAssetClient::new(&env, &token).mint(&market, &limit);
 
@@ -914,5 +1016,187 @@ mod treasury_lifecycle_tests {
             daily.keys().len()
         });
         assert!(daily_len <= 2, "DAILY_WITHDRAWN map length should be ≤ 2, got {daily_len}");
+    }
+}
+
+// ============================================================
+// ISSUE #492: Daily withdrawal caps + immutable audit trail
+// ============================================================
+#[cfg(test)]
+mod audit_trail_tests {
+    use soroban_sdk::{
+        testutils::{Address as _, Events, Ledger},
+        token::StellarAssetClient,
+        Address, Env, TryFromVal,
+    };
+    use super::{Treasury, TreasuryClient};
+    use boxmeout_shared::types::{AuditAction, AuditEntry};
+
+    fn setup(
+        env: &Env,
+        limit: i128,
+        seed: i128,
+    ) -> (TreasuryClient<'static>, Address, Address, Address) {
+        env.mock_all_auths();
+        let id = env.register_contract(None, Treasury);
+        let client = TreasuryClient::new(env, &id);
+        let admin = Address::generate(env);
+        let market = Address::generate(env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let factory = Address::generate(env);
+        client.initialize(&admin, &token, &factory, &limit);
+        StellarAssetClient::new(env, &token).mint(&market, &seed);
+        client.approve_market(&admin, &market);
+        client.deposit_fees(&market, &token, &seed);
+        (client, admin, market, token)
+    }
+
+    fn set_ledger_time(env: &Env, ts: u64) {
+        env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+            timestamp: ts,
+            protocol_version: 20,
+            sequence_number: 100,
+            network_id: Default::default(),
+            base_reserve: 1,
+            min_temp_entry_ttl: 16,
+            min_persistent_entry_ttl: 4096,
+            max_entry_ttl: 6_311_520,
+        });
+    }
+
+    /// deposit_fees records an immutable audit entry.
+    #[test]
+    fn test_deposit_records_audit_entry() {
+        let env = Env::default();
+        let (client, _admin, market, token) = setup(&env, 10_000_000, 10_000_000);
+
+        assert_eq!(client.get_audit_log_count(), 1);
+        let entry: AuditEntry = client.get_audit_entry(&0u64).unwrap();
+        assert_eq!(entry.id, 0);
+        assert_eq!(entry.action, AuditAction::FeeDeposited);
+        assert_eq!(entry.token, token);
+        assert_eq!(entry.amount, 10_000_000);
+        assert_eq!(entry.actor, market);
+    }
+
+    /// withdraw_fees records an immutable audit entry that is never mutated.
+    #[test]
+    fn test_withdraw_records_immutable_audit_entry() {
+        let env = Env::default();
+        set_ledger_time(&env, 86_400);
+        let (client, admin, _market, token) = setup(&env, 10_000_000, 20_000_000);
+        let dest = Address::generate(&env);
+
+        client.withdraw_fees(&admin, &token, &10_000_000, &dest);
+
+        assert_eq!(client.get_audit_log_count(), 2);
+        let entry: AuditEntry = client.get_audit_entry(&1u64).unwrap();
+        assert_eq!(entry.id, 1);
+        assert_eq!(entry.action, AuditAction::FeeWithdrawn);
+        assert_eq!(entry.token, token);
+        assert_eq!(entry.amount, 10_000_000);
+        assert_eq!(entry.actor, dest);
+        assert!(entry.timestamp > 0);
+    }
+
+    /// Audit ids are monotonically increasing (append-only ledger).
+    #[test]
+    fn test_audit_ids_are_monotonic() {
+        let env = Env::default();
+        // Limit high enough to allow a pair of minimum-sized withdrawals that
+        // stays within the daily cap: 2 x 10_000_000 <= 30_000_000 limit.
+        let (client, admin, _market, token) = setup(&env, 30_000_000, 30_000_000);
+        let dest = Address::generate(&env);
+
+        // Two withdrawals whose sum stays within the daily limit and each of
+        // which is at or above the 1 XLM minimum.
+        client.withdraw_fees(&admin, &token, &10_000_000, &dest);
+        client.withdraw_fees(&admin, &token, &10_000_000, &dest);
+
+        assert_eq!(client.get_audit_log_count(), 3);
+        let e0 = client.get_audit_entry(&0u64).unwrap();
+        let e1 = client.get_audit_entry(&1u64).unwrap();
+        let e2 = client.get_audit_entry(&2u64).unwrap();
+        assert!(e0.id < e1.id && e1.id < e2.id);
+    }
+
+    /// Out-of-range audit reads return None (log is finite).
+    #[test]
+    fn test_audit_entry_out_of_range_returns_none() {
+        let env = Env::default();
+        let (client, _admin, _market, _token) = setup(&env, 10_000_000, 10_000_000);
+        assert!(client.get_audit_entry(&99u64).is_none());
+    }
+
+    /// The strict daily cap prevents cumulative withdrawals beyond `limit`.
+    #[test]
+    fn test_daily_cap_enforced_within_a_single_day() {
+        let env = Env::default();
+        set_ledger_time(&env, 86_400);
+        let limit = 10_000_000i128;
+        // pool has 30 XLM so balance is never the limiting factor
+        let (client, admin, _market, token) = setup(&env, limit, 30_000_000);
+        let dest = Address::generate(&env);
+
+        // First withdrawal uses the whole day's allowance.
+        client.withdraw_fees(&admin, &token, &10_000_000, &dest);
+        assert_eq!(client.get_daily_withdrawal_amount(), limit);
+
+        // Any further withdrawal within the same day must be rejected, even
+        // though the contract still holds sufficient balance.
+        let result = client.try_withdraw_fees(&admin, &token, &10_000_000, &dest);
+        assert!(result.is_err(), "daily cap must reject a second same-day withdrawal");
+    }
+
+    /// The daily cap resets on the next day bucket.
+    #[test]
+    fn test_daily_cap_resets_next_day() {
+        let env = Env::default();
+        let limit = 10_000_000i128;
+        let (client, admin, _market, token) = setup(&env, limit, 30_000_000);
+        let dest = Address::generate(&env);
+
+        set_ledger_time(&env, 86_400);
+        client.withdraw_fees(&admin, &token, &10_000_000, &dest);
+        assert!(client.try_withdraw_fees(&admin, &token, &10_000_000, &dest).is_err());
+
+        set_ledger_time(&env, 86_400 * 2);
+        client.withdraw_fees(&admin, &token, &10_000_000, &dest);
+        assert_eq!(client.get_daily_withdrawal_amount(), limit);
+    }
+
+    /// gas cap: get_withdrawal_limit returns the configured limit.
+    #[test]
+    fn test_get_withdrawal_limit() {
+        let env = Env::default();
+        let (client, _admin, _market, _token) = setup(&env, 5_000_000, 5_000_000);
+        assert_eq!(client.get_withdrawal_limit(), 5_000_000);
+    }
+
+    /// The audit event is emitted with the full entry payload.
+    #[test]
+    fn test_audit_recorded_event_emitted() {
+        let env = Env::default();
+        let (client, admin, _market, token) = setup(&env, 10_000_000, 20_000_000);
+        let dest = Address::generate(&env);
+
+        client.withdraw_fees(&admin, &token, &10_000_000, &dest);
+
+        let events = env.events().all();
+        let mut found = false;
+        for e in events.iter() {
+            let topic_sym =
+                soroban_sdk::Symbol::try_from_val(&env, &e.1.get(0).unwrap()).unwrap();
+            if topic_sym == soroban_sdk::Symbol::new(&env, "audit_recorded") {
+                let entry: AuditEntry = soroban_sdk::TryFromVal::try_from_val(&env, &e.2).unwrap();
+                // At least one audit entry must describe the withdrawal (a
+                // deposit audit entry is also recorded during setup).
+                if entry.action == AuditAction::FeeWithdrawn {
+                    assert_eq!(entry.amount, 10_000_000);
+                    found = true;
+                }
+            }
+        }
+        assert!(found, "withdrawal audit_recorded event must be emitted");
     }
 }
