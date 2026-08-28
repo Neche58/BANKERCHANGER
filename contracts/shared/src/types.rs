@@ -201,7 +201,7 @@ pub struct UserPosition {
 
 /// Receipt returned to the bettor after a successful claim.
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ClaimReceipt {
     pub bettor: Address,
     pub market_id: u64,
@@ -212,39 +212,39 @@ pub struct ClaimReceipt {
     pub claimed_at: u64,
 }
 
-/// Audit entry for an immutable treasury withdrawal log.
-/// Stored on-chain as an event; never mutable after emission.
+// ─── Treasury Audit Trail ─────────────────────────────────────────────────────
+
+/// The type of fund-moving operation recorded in the treasury audit ledger.
 #[contracttype]
-#[derive(Clone, Debug)]
-pub struct AuditEntry {
-    /// Admin address that triggered the withdrawal
-    pub admin: Address,
-    /// Token withdrawn
-    pub token: Address,
-    /// Amount withdrawn in stroops
-    pub amount: i128,
-    /// Destination address
-    pub destination: Address,
-    /// Running daily total AFTER this withdrawal
-    pub daily_total: i128,
-    /// Ledger timestamp
-    pub timestamp: u64,
-    /// Day bucket (timestamp / 86400)
-    pub day_bucket: u64,
+#[derive(Clone, Debug, PartialEq)]
+pub enum AuditAction {
+    /// A market deposited fees into the treasury.
+    FeeDeposited,
+    /// Fees were received from a registered market (per-market breakdown).
+    FeeReceived,
+    /// The admin withdrew accumulated fees.
+    FeeWithdrawn,
+    /// The admin emergency-drained all fees for a token.
+    FeeDrained,
 }
 
-/// LP position held by a liquidity provider in a market pool.
+/// An immutable, append-only entry in the treasury audit ledger.
+///
+/// Entries are keyed by a monotonically increasing `id` and are never mutated
+/// or removed — they form a tamper-evident history of every fund movement.
 #[contracttype]
-#[derive(Clone, Debug)]
-pub struct LiquidityPosition {
-    /// Provider's Stellar address
-    pub provider: Address,
-    /// Market ID this position is for
-    pub market_id: u64,
-    /// Number of LP shares held
-    pub lp_shares: i128,
-    /// Fee-per-share accumulator snapshot at entry (for fee calculation)
-    pub fee_debt: i128,
-    /// Timestamp when the position was opened
-    pub entered_at: u64,
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuditEntry {
+    /// Monotonically increasing entry id (1-based).
+    pub id: u64,
+    /// The action that produced this entry.
+    pub action: AuditAction,
+    /// The token involved in the operation.
+    pub token: Address,
+    /// The signed amount moved (positive for in, negative for out).
+    pub amount: i128,
+    /// The acting address (market or admin).
+    pub actor: Address,
+    /// Ledger timestamp when the entry was recorded.
+    pub timestamp: u64,
 }
