@@ -37,6 +37,7 @@ mod security_tests {
             fee_bps: 200,
             lock_before_secs: 3600,
             resolution_window: 86400,
+            tier: 0,
         }
     }
 
@@ -384,6 +385,7 @@ mod place_bet_edge_cases {
             fee_bps: 200,
             lock_before_secs: 3600,
             resolution_window: 86400,
+            tier: 0,
         }
     }
 
@@ -727,6 +729,7 @@ mod full_market_lifecycle {
             fee_bps: 200,
             lock_before_secs: 3600,
             resolution_window: 86400,
+            tier: 0,
         }
     }
 
@@ -906,6 +909,7 @@ mod resolve_dispute_tests {
             fee_bps: 200,
             lock_before_secs: 3600,
             resolution_window: 86400,
+            tier: 0,
         }
     }
 
@@ -1077,6 +1081,7 @@ mod get_current_odds_tests {
             fee_bps: 200,
             lock_before_secs: 3600,
             resolution_window: 86400,
+            tier: 0,
         }
     }
 
@@ -1215,6 +1220,7 @@ mod estimate_payout_tests {
             fee_bps: 200,
             lock_before_secs: 3600,
             resolution_window: 86400,
+            tier: 0,
         }
     }
 
@@ -1387,6 +1393,7 @@ mod oracle_sig_tests {
             fee_bps: 200,
             lock_before_secs: 3600,
             resolution_window: 86400,
+            tier: 0,
         }
     }
 
@@ -1637,6 +1644,7 @@ mod claim_routing_tests {
             fee_bps: 200,
             lock_before_secs: 3600,
             resolution_window: 86400,
+            tier: 0,
         }
     }
 
@@ -2000,6 +2008,7 @@ mod bet_timing_lock_tests {
             fee_bps: 200,
             lock_before_secs: LOCK_BEFORE_SECS,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 
@@ -2104,6 +2113,7 @@ mod min_bet_enforcement_tests {
             fee_bps: 200,
             lock_before_secs: 3_600,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 
@@ -2216,6 +2226,7 @@ mod place_bet_boundary_fuzz_tests {
             fee_bps: 200,
             lock_before_secs: 3_600,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 
@@ -2336,6 +2347,7 @@ mod get_all_bets_tests {
             fee_bps: 200,
             lock_before_secs: 3_600,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 
@@ -2493,6 +2505,7 @@ mod market_lifecycle_tests {
             fee_bps: 200,
             lock_before_secs: LOCK_BEFORE,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 
@@ -2846,6 +2859,7 @@ mod stale_oracle_reports_tests {
             fee_bps: 200,
             lock_before_secs: 3_600,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 
@@ -3082,6 +3096,7 @@ mod reentrancy_regression_tests {
             fee_bps: 200,
             lock_before_secs: 3_600,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 
@@ -3365,6 +3380,7 @@ mod event_emission_consistency_tests {
             fee_bps: 200,
             lock_before_secs: 3_600,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 
@@ -3833,6 +3849,7 @@ mod slippage_bounds_tests {
             fee_bps: 200,
             lock_before_secs: 3_600,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 
@@ -4038,6 +4055,7 @@ mod upgrade_safety_tests {
             fee_bps: 200,
             lock_before_secs: 3_600,
             resolution_window: 86_400,
+            tier: 0,
         }
     }
 

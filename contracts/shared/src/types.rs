@@ -79,6 +79,10 @@ pub struct MarketConfig {
     pub lock_before_secs: u64,
     /// Seconds after scheduled_at within which oracle must resolve
     pub resolution_window: u64,
+    /// Market tier — determines pool depth requirements and slippage tolerance.
+    /// e.g. 18 = Tier 18 (mid-range), 20 = Tier 20 (high-stakes).
+    /// Tier 0 means untiered / default.
+    pub tier: u32,
 }
 
 /// Configuration passed to MarketFactory on initialization.
@@ -206,4 +210,41 @@ pub struct ClaimReceipt {
     /// Platform fee deducted before transfer
     pub fee_deducted: i128,
     pub claimed_at: u64,
+}
+
+/// Audit entry for an immutable treasury withdrawal log.
+/// Stored on-chain as an event; never mutable after emission.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AuditEntry {
+    /// Admin address that triggered the withdrawal
+    pub admin: Address,
+    /// Token withdrawn
+    pub token: Address,
+    /// Amount withdrawn in stroops
+    pub amount: i128,
+    /// Destination address
+    pub destination: Address,
+    /// Running daily total AFTER this withdrawal
+    pub daily_total: i128,
+    /// Ledger timestamp
+    pub timestamp: u64,
+    /// Day bucket (timestamp / 86400)
+    pub day_bucket: u64,
+}
+
+/// LP position held by a liquidity provider in a market pool.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct LiquidityPosition {
+    /// Provider's Stellar address
+    pub provider: Address,
+    /// Market ID this position is for
+    pub market_id: u64,
+    /// Number of LP shares held
+    pub lp_shares: i128,
+    /// Fee-per-share accumulator snapshot at entry (for fee calculation)
+    pub fee_debt: i128,
+    /// Timestamp when the position was opened
+    pub entered_at: u64,
 }

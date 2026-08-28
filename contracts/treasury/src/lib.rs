@@ -18,6 +18,8 @@ const APPROVED_MARKETS: &str        = "APPROVED_MARKETS";
 const WITHDRAWAL_LIMIT: &str        = "WITHDRAWAL_LIMIT";
 const DAILY_WITHDRAWN: &str         = "DAILY_WITHDRAWN";
 const WITHDRAWALS_PAUSED: &str      = "WITHDRAWALS_PAUSED";
+/// Reentrancy guard for withdraw_fees — set true while a withdrawal transfer is in flight
+const FEE_WITHDRAWING: &str         = "FEE_WITHDRAWING";
 const MIN_WITHDRAWAL: i128          = 10_000_000; // 1 XLM in stroops
 
 #[contract]
@@ -52,6 +54,16 @@ impl Treasury {
         for k in stale.iter() {
             daily.remove(k);
         }
+    }
+
+    /// Returns an error if a fee withdrawal transfer is already in progress.
+    /// Prevents double-spend under concurrent invocations on the same ledger.
+    fn require_not_withdrawing(env: &Env) -> Result<(), ContractError> {
+        let withdrawing: bool = env.storage().instance().get(&FEE_WITHDRAWING).unwrap_or(false);
+        if withdrawing {
+            return Err(ContractError::ReentrancyGuard);
+        }
+        Ok(())
     }
 
     fn add_to_accumulated_token(env: &Env, token: &Address, amount: i128) {
@@ -216,14 +228,17 @@ impl Treasury {
     ///
     /// # Errors
     /// - `Unauthorized`: Caller is not the admin
+    /// - `ReentrancyGuard`: A withdrawal is already in progress
+    /// - `WithdrawalsPaused`: Withdrawals are temporarily paused
     /// - `BelowMinimum`: Withdrawal amount is below minimum (1 XLM)
-    /// - `DailyWithdrawalLimitExceeded`: Withdrawal exceeds daily limit
+    /// - `DailyWithdrawalLimitExceeded`: Withdrawal exceeds per-tx or daily limit
     /// - `InsufficientBalance`: Not enough fees accumulated
     ///
     /// # Security (CEI)
-    /// 1. CHECKS: require_auth, limits, balance
-    /// 2. EFFECTS: decrement fees + increment daily tracker
+    /// 1. CHECKS: require_auth, reentrancy guard, paused, limits, balance
+    /// 2. EFFECTS: set FEE_WITHDRAWING, decrement fees, increment daily tracker
     /// 3. INTERACTIONS: token transfer last
+    /// 4. CLEANUP: clear FEE_WITHDRAWING, emit audit log
     pub fn withdraw_fees(
         env: Env,
         admin: Address,
@@ -231,34 +246,39 @@ impl Treasury {
         amount: i128,
         destination: Address,
     ) -> Result<(), ContractError> {
-        // CHECKS
+        // ── CHECKS ────────────────────────────────────────────────────────────
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
+        Self::require_not_withdrawing(&env)?;           // reentrancy / double-spend guard
 
-        // Check minimum withdrawal amount
+        // Check paused flag — use dedicated WithdrawalsPaused error
+        let paused: bool = env.storage().persistent().get(&WITHDRAWALS_PAUSED).unwrap_or(false);
+        if paused {
+            return Err(ContractError::WithdrawalsPaused);
+        }
+
+        // Enforce minimum withdrawal amount (1 XLM)
         if amount < MIN_WITHDRAWAL {
             return Err(ContractError::BelowMinimum);
         }
 
-        // Check paused flag
-        let paused: bool = env.storage().persistent().get(&WITHDRAWALS_PAUSED).unwrap_or(false);
-        if paused {
-            return Err(ContractError::DailyWithdrawalLimitExceeded);
-        }
-
+        // Enforce per-transaction limit
         let limit: i128 = env.storage().persistent().get(&WITHDRAWAL_LIMIT).unwrap_or(0);
-        if amount > limit {
+        if limit == 0 || amount > limit {
             return Err(ContractError::DailyWithdrawalLimitExceeded);
         }
 
+        // Enforce daily aggregate cap: max 5× single-tx limit per 24h window
         let bucket = Self::day_bucket(&env);
         let mut daily: Map<u64, i128> =
             env.storage().persistent().get(&DAILY_WITHDRAWN).unwrap_or_else(|| Map::new(&env));
         let today_total = daily.get(bucket).unwrap_or(0);
-        if today_total + amount > limit * 5 {
+        let daily_cap = limit.saturating_mul(5);
+        if today_total.saturating_add(amount) > daily_cap {
             return Err(ContractError::DailyWithdrawalLimitExceeded);
         }
 
+        // Verify sufficient fee balance
         let mut fees: Map<Address, i128> =
             env.storage().persistent().get(&ACCUMULATED_FEES).unwrap_or_else(|| Map::new(&env));
         let balance = fees.get(token.clone()).unwrap_or(0);
@@ -266,12 +286,19 @@ impl Treasury {
             return Err(ContractError::InsufficientBalance);
         }
 
-        // EFFECTS
+        // ── EFFECTS ───────────────────────────────────────────────────────────
+        // Set reentrancy guard BEFORE any state mutation or transfer
+        env.storage().instance().set(&FEE_WITHDRAWING, &true);
+
+        // Deduct from accumulated fees
         fees.set(token.clone(), balance - amount);
         env.storage().persistent().set(&ACCUMULATED_FEES, &fees);
-        daily.set(bucket, today_total + amount);
 
-        // Prune DAILY_WITHDRAWN — keep only current and previous day bucket
+        // Update daily tracker
+        let new_daily_total = today_total + amount;
+        daily.set(bucket, new_daily_total);
+
+        // Prune DAILY_WITHDRAWN — keep only current and previous day buckets
         let prune_before = bucket.saturating_sub(1);
         let keys: Vec<u64> = daily.keys();
         for k in keys.iter() {
@@ -281,11 +308,31 @@ impl Treasury {
         }
         env.storage().persistent().set(&DAILY_WITHDRAWN, &daily);
 
-        // INTERACTIONS
+        // ── INTERACTIONS ──────────────────────────────────────────────────────
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&env.current_contract_address(), &destination, &amount);
 
-        boxmeout_shared::emit_fee_withdrawn(&env, token, amount, destination);
+        // ── CLEANUP ───────────────────────────────────────────────────────────
+        // Clear reentrancy guard
+        env.storage().instance().set(&FEE_WITHDRAWING, &false);
+
+        // Emit standard fee-withdrawn event
+        boxmeout_shared::emit_fee_withdrawn(&env, token.clone(), amount, destination.clone());
+
+        // Emit immutable audit log event for full traceability
+        boxmeout_shared::emit_withdrawal_audit_log(
+            &env,
+            boxmeout_shared::types::AuditEntry {
+                admin: admin.clone(),
+                token,
+                amount,
+                destination,
+                daily_total: new_daily_total,
+                timestamp: env.ledger().timestamp(),
+                day_bucket: bucket,
+            },
+        );
+
         Ok(())
     }
 
@@ -332,7 +379,7 @@ impl Treasury {
         daily.get(bucket).unwrap_or(0)
     }
 
-    /// Updates the daily withdrawal limit.
+    /// Updates the daily withdrawal limit and emits an audit event.
     ///
     /// # Errors
     /// - `Unauthorized`: Caller is not the admin
@@ -343,7 +390,25 @@ impl Treasury {
     ) -> Result<(), ContractError> {
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
+        let old_limit: i128 = env.storage().persistent().get(&WITHDRAWAL_LIMIT).unwrap_or(0);
         env.storage().persistent().set(&WITHDRAWAL_LIMIT, &new_limit);
+        boxmeout_shared::emit_withdrawal_limit_updated(&env, old_limit, new_limit);
+        Ok(())
+    }
+
+    /// Pauses or unpauses fee withdrawals.
+    ///
+    /// # Errors
+    /// - `Unauthorized`: Caller is not the admin
+    pub fn set_withdrawals_paused(
+        env: Env,
+        admin: Address,
+        paused: bool,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
+        env.storage().persistent().set(&WITHDRAWALS_PAUSED, &paused);
+        boxmeout_shared::emit_withdrawals_paused(&env, paused);
         Ok(())
     }
 
